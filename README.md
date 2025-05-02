@@ -4,7 +4,7 @@ Development of this library has stopped and will likely not continue.
 
 [IDLs are the devil's work](https://x.com/search?q=from%3Adj_d_sol%20idl&src=recent_search_click), and I will not contribute to their further proliferation.
 
-Rust is all you need. You can write a minimal `no-std` base sdk crate that is portable across onchain (both CPI and for the development of the program itself) and offchain (js via wasm, python via pyo3) environments. Use the same codebase for everything instead of trying to sync changes across different languages using a lossy json format. Here's an [incomplete example with only CPI integrations](https://github.com/igneous-labs/sanctum-spl-token-sdk).
+Rust is all you need. You can write a minimal `no-std` base sdk crate that is portable across onchain (both CPI and for the development of the program itself) and offchain (rust clients, js via wasm, python via pyo3) environments. Use the same codebase for everything instead of trying to sync changes across different languages using a lossy json format. Here's an [incomplete example with only CPI integrations](https://github.com/igneous-labs/sanctum-spl-token-sdk).
 
 You can just do this instead of spending your time learning about how each of codama's "over 60 different types of (AST) nodes" work and [debugging generated code](https://github.com/metaplex-foundation/mpl-token-metadata/issues/140).
 
