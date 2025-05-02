@@ -1,4 +1,4 @@
-use proc_macro2::{Ident, Span, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream, TokenTree};
 use quote::quote;
 use std::{io::Write, path::Path};
 
@@ -64,13 +64,34 @@ pub fn write_lib(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
 fn write_src_file<P: AsRef<Path>>(
     args: &Args,
     src_file_path: P,
-    contents: TokenStream,
+    mut contents: TokenStream,
 ) -> std::io::Result<()> {
-    let unpretty = syn::parse2(contents).unwrap();
+    let sanitized_contents = sanitize_tokens(contents);
+
+    let unpretty = syn::parse2(sanitized_contents).unwrap();
     let formatted = prettyplease::unparse(&unpretty);
 
     let path = args.output_dir.join(src_file_path);
     let mut file = open_file_create_overwrite(path)?;
     file.write_all(formatted.as_bytes())?;
     file.flush()
+}
+
+
+fn sanitize_tokens(input: TokenStream) -> TokenStream {
+    input.into_iter().map(sanitize_token).collect()
+}
+
+fn sanitize_token(token: TokenTree) -> TokenTree {
+    match token {
+        TokenTree::Group(group) => {
+            let content = sanitize_tokens(group.stream());
+            TokenTree::Group(proc_macro2::Group::new(group.delimiter(), content))
+        },
+        TokenTree::Ident(ident) if ident == "type" => {
+            let raw_type = quote! { r#type };
+            raw_type.into_iter().next().unwrap()
+        },
+        _ => token,
+    }
 }
