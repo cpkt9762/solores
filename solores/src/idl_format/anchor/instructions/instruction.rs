@@ -14,7 +14,7 @@ use crate::{
     utils::{unique_by_report_dups, UniqueByReportDupsResult},
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct NamedInstruction {
     pub name: String,
     pub accounts: Option<Vec<IxAccountEntry>>,
@@ -217,7 +217,29 @@ impl NamedInstruction {
             }
         });
     }
-
+    /// From <&[String]> for XKeys
+    pub fn write_from_string_arr_for_keys(&self, tokens: &mut TokenStream, accounts: &[IxAccount]) {
+        if !self.has_accounts() {
+            return;
+        }
+        let keys_ident = self.keys_ident();
+        let from_pubkey_arr_fields = accounts.iter().enumerate().map(|(i, acc)| {
+            let account_ident = format_ident!("{}", &acc.name.to_snake_case());
+            let index_lit = LitInt::new(&i.to_string(), Span::call_site());
+            quote! {
+                #account_ident: pubkeys[#index_lit].parse().unwrap()
+            }
+        });
+        tokens.extend(quote! {
+            impl From<&[String]> for #keys_ident {
+                fn from(pubkeys: &[String]) -> Self {
+                    Self {
+                        #(#from_pubkey_arr_fields),*
+                    }
+                }
+            }
+        });
+    }
     /// From <XAccounts> for [AccountInfo]
     pub fn write_from_accounts_for_account_info_arr(
         &self,
@@ -624,7 +646,7 @@ impl NamedInstruction {
         let mut writables = accounts
             .iter()
             .filter_map(|a| {
-                if a.is_mut {
+                if a.is_mut.unwrap_or(false) {
                     let name = a.field_ident();
                     Some(quote! {
                         accounts.#name
@@ -658,7 +680,7 @@ impl NamedInstruction {
         let mut signers = accounts
             .iter()
             .filter_map(|a| {
-                if a.is_signer {
+                if a.is_signer.unwrap_or(false) {
                     let name = a.field_ident();
                     Some(quote! {
                         accounts.#name
@@ -726,6 +748,7 @@ impl ToTokens for NamedInstruction {
         self.write_from_accounts_for_keys(tokens, &accounts);
         self.write_from_keys_for_meta_arr(tokens, &accounts);
         self.write_from_pubkey_arr_for_keys(tokens, &accounts);
+        self.write_from_string_arr_for_keys(tokens, &accounts);
         self.write_from_accounts_for_account_info_arr(tokens, &accounts);
         self.write_from_account_info_arr_for_accounts(tokens, &accounts);
 
@@ -744,7 +767,7 @@ impl ToTokens for NamedInstruction {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct InnerAccountStruct {
     pub name: String,
     pub accounts: Vec<IxAccountEntry>,
@@ -759,7 +782,7 @@ impl InnerAccountStruct {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(untagged)]
 pub enum IxAccountEntry {
     Account(IxAccount),
@@ -775,12 +798,12 @@ impl IxAccountEntry {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct IxAccount {
     pub name: String,
-    pub is_mut: bool,
-    pub is_signer: bool,
+    pub is_mut: Option<bool>,
+    pub is_signer: Option<bool>,
 }
 
 impl IxAccount {
@@ -789,12 +812,12 @@ impl IxAccount {
     }
 
     pub fn is_privileged(&self) -> bool {
-        self.is_mut || self.is_signer
+        self.is_mut.unwrap_or(false) || self.is_signer.unwrap_or(false)
     }
 
     pub fn to_keys_account_meta_tokens(&self) -> TokenStream {
-        let is_writable_arg = LitBool::new(self.is_mut, Span::call_site());
-        let is_signer_arg = LitBool::new(self.is_signer, Span::call_site());
+        let is_writable_arg = LitBool::new(self.is_mut.unwrap_or(false), Span::call_site());
+        let is_signer_arg = LitBool::new(self.is_signer.unwrap_or(false), Span::call_site());
         let name = self.field_ident();
         quote! {
             AccountMeta {

@@ -4,7 +4,7 @@ use quote::{format_ident, quote, ToTokens};
 use serde::Deserialize;
 use syn::LitInt;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ErrorEnumVariant {
     code: u32,
     name: String,

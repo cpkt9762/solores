@@ -22,10 +22,11 @@ pub mod events;
 pub mod instructions;
 pub mod typedefs;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct AnchorIdl {
-    pub name: String,
-    pub version: String,
+    pub address: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
     pub metadata: Option<Metadata>,
     pub accounts: Option<Vec<NamedAccount>>,
     pub types: Option<Vec<NamedType>>,
@@ -34,22 +35,44 @@ pub struct AnchorIdl {
     pub events: Option<Vec<Event>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Metadata {
-    pub address: String,
+    pub address: Option<String>,
+    pub name: Option<String>,
+    pub version: Option<String>,
+    pub spec: Option<String>,
+    pub description: Option<String>,
 }
 
 impl IdlFormat for AnchorIdl {
     fn program_name(&self) -> &str {
-        &self.name
+        if let Some(name) = &self.name {
+            name.as_str()
+        } else if let Some(name) = self.metadata.as_ref().map(|m| m.name.as_ref()) {
+            name.unwrap()
+        } else {
+            "anchor"
+        }
     }
 
     fn program_version(&self) -> &str {
-        &self.version
+        if let Some(version) = &self.version {
+            version.as_str()
+        } else if let Some(version) = self.metadata.as_ref().map(|m| m.version.as_ref()) {
+            version.unwrap()
+        } else {
+            "0.0.0"
+        }
     }
 
     fn program_address(&self) -> Option<&str> {
-        self.metadata.as_ref().map(|m| m.address.as_ref())
+        if let Some(address) = &self.address {
+            Some(address.as_str())
+        } else if let Some(address) = self.metadata.as_ref().map(|m| m.address.as_ref()) {
+            address.map(|s| s.as_str())
+        } else {
+            None
+        }
     }
 
     /// Anchor IDLs dont seem to have an identifier,

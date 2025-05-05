@@ -152,6 +152,7 @@ pub struct EnumVariant {
 
 impl ToTokens for TypedefStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        println!("struct: {}", tokens);
         let typedef_fields = self.fields.iter().map(|f| quote! { pub #f });
         tokens.extend(quote! {
             #(#typedef_fields),*
@@ -161,6 +162,7 @@ impl ToTokens for TypedefStruct {
 
 impl ToTokens for TypedefField {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        println!("field: {}", self.name);
         let name = format_ident!("{}", self.name.to_snake_case());
         let ty = &self.r#type;
         tokens.extend(quote! {
@@ -171,6 +173,7 @@ impl ToTokens for TypedefField {
 
 impl ToTokens for TypedefFieldType {
     fn to_tokens(&self, tokens: &mut TokenStream) {
+        println!("field type: {:?}", tokens);
         let ty: TokenStream = match self {
             Self::PrimitiveOrPubkey(s) => primitive_or_pubkey_to_token(s).parse().unwrap(),
             Self::defined(s) => s.parse().unwrap(),

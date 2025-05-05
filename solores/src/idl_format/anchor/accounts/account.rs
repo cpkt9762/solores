@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use crate::idl_format::anchor::typedefs::NamedType;
 use crate::utils::conditional_pascal_case;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct NamedAccount(pub NamedType);
 
 impl NamedAccount {
@@ -25,7 +25,12 @@ impl NamedAccount {
 
         let struct_def = self.0.to_token_stream(cli_args);
 
-        let struct_ident = format_ident!("{}", conditional_pascal_case(name));
+        let name_ident = format_ident!("{}", conditional_pascal_case(name));
+        let struct_ident: TokenStream = if self.0.r#type.is_none() {
+            quote! { crate::typedefs::#name_ident }
+        } else {
+            quote! { #name_ident }
+        };
         let account_ident = format_ident!("{}Account", conditional_pascal_case(name));
         quote! {
             pub const #account_discm_ident: [u8; 8] = #discm_tokens;

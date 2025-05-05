@@ -29,11 +29,13 @@ impl IdlCodegenModule for TypedefsCodegenModule<'_> {
             }
         }
         for t in self.named_types {
-            if t.r#type.has_pubkey_field() {
-                res.extend(quote! {
-                    use solana_program::pubkey::Pubkey;
-                });
-                break;
+            if let Some(r#type) = &t.r#type {
+                if r#type.has_pubkey_field() {
+                    res.extend(quote! {
+                        use solana_program::pubkey::Pubkey;
+                    });
+                    break;
+                }
             }
         }
         res

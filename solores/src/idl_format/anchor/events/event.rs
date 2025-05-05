@@ -6,15 +6,16 @@ use sha2::{Digest, Sha256};
 
 use crate::idl_format::anchor::typedefs::TypedefField;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Event(pub EventType);
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct EventType {
     pub name: String,
+    pub discriminator: Option<[u8; 8]>,
     // NB: theres also an `index` field that's ignored for now since we dk what it does:
     // https://github.com/coral-xyz/anchor/blob/8f30f00ec363b7e82aa0b3c7041e912919b33cf5/lang/attribute/event/src/lib.rs#L62C1-L64
-    pub fields: Vec<TypedefField>,
+    pub fields: Option<Vec<TypedefField>>,
 }
 
 impl EventType {
@@ -38,6 +39,11 @@ impl ToTokens for Event {
 
         let struct_ident = self.0.struct_ident();
         let event_ident = format_ident!("{}Event", struct_ident);
+        let struct_ident: TokenStream = if self.0.fields.is_none() {
+            quote! { crate::typedefs::#struct_ident }
+        } else {
+            quote! { #struct_ident }
+        };
         tokens.extend(quote! {
             pub const #event_discm_ident: [u8; 8] = #discm_tokens;
 
@@ -73,13 +79,14 @@ impl ToTokens for Event {
 impl ToTokens for EventType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let struct_ident = self.struct_ident();
-        let struct_fields = &self.fields;
-        tokens.extend(quote! {
-            #[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize)]
-            pub struct #struct_ident {
-                #(pub #struct_fields),*
-            }
-        });
+        if let Some(struct_fields) = &self.fields {
+            tokens.extend(quote! {
+                #[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize)]
+                pub struct #struct_ident {
+                    #(pub #struct_fields),*
+                }
+            });
+        }
     }
 }
 
@@ -104,7 +111,8 @@ mod tests {
         // Create an EventType with the fields.
         let event_type = EventType {
             name: "TestEvent".to_string(),
-            fields: vec![field1, field2],
+            discriminator: Some([0; 8]),
+            fields: Some(vec![field1, field2]),
         };
 
         // Generate the tokens.

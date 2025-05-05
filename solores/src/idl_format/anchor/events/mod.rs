@@ -20,18 +20,20 @@ impl IdlCodegenModule for EventsCodegenModule<'_> {
         let mut has_pubkey = false;
         let mut has_defined = false;
         for a in self.0 {
-            for field in &a.0.fields {
-                if field.r#type.is_or_has_pubkey() && !has_pubkey {
-                    has_pubkey = true;
-                    res.extend(quote! {
-                        use solana_program::pubkey::Pubkey;
-                    });
-                }
-                if field.r#type.is_or_has_defined() && !has_defined {
-                    has_defined = true;
-                    res.extend(quote! {
-                        use crate::*;
-                    })
+            if let Some(fields) = &a.0.fields {
+                for field in fields {
+                    if field.r#type.is_or_has_pubkey() && !has_pubkey {
+                        has_pubkey = true;
+                        res.extend(quote! {
+                            use solana_program::pubkey::Pubkey;
+                        });
+                    }
+                    if field.r#type.is_or_has_defined() && !has_defined {
+                        has_defined = true;
+                        res.extend(quote! {
+                            use crate::*;
+                        })
+                    }
                 }
             }
             if has_defined && has_pubkey {

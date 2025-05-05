@@ -31,18 +31,21 @@ impl IdlCodegenModule for AccountsCodegenModule<'_> {
         let mut has_pubkey = false;
         let mut has_defined = false;
         for a in self.named_accounts {
-            if a.0.r#type.has_pubkey_field() && !has_pubkey {
-                has_pubkey = true;
-                res.extend(quote! {
-                    use solana_program::pubkey::Pubkey;
-                });
+            if let Some(r#type) = &a.0.r#type {
+                if r#type.has_pubkey_field() && !has_pubkey {
+                    has_pubkey = true;
+                    res.extend(quote! {
+                        use solana_program::pubkey::Pubkey;
+                    });
+                    if r#type.has_defined_field() && !has_defined {
+                        has_defined = true;
+                        res.extend(quote! {
+                            use crate::*;
+                        })
+                    }
+                }
             }
-            if a.0.r#type.has_defined_field() && !has_defined {
-                has_defined = true;
-                res.extend(quote! {
-                    use crate::*;
-                })
-            }
+
             if has_defined && has_pubkey {
                 break;
             }

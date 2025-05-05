@@ -67,8 +67,15 @@ fn write_src_file<P: AsRef<Path>>(
     mut contents: TokenStream,
 ) -> std::io::Result<()> {
     let sanitized_contents = sanitize_tokens(contents);
-
-    let unpretty = syn::parse2(sanitized_contents).unwrap();
+    let unpretty = match syn::parse2(sanitized_contents) {
+        Ok(unpretty) => unpretty,
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e.to_string(),
+            ));
+        }
+    };
     let formatted = prettyplease::unparse(&unpretty);
 
     let path = args.output_dir.join(src_file_path);
@@ -76,7 +83,6 @@ fn write_src_file<P: AsRef<Path>>(
     file.write_all(formatted.as_bytes())?;
     file.flush()
 }
-
 
 fn sanitize_tokens(input: TokenStream) -> TokenStream {
     input.into_iter().map(sanitize_token).collect()
@@ -87,11 +93,11 @@ fn sanitize_token(token: TokenTree) -> TokenTree {
         TokenTree::Group(group) => {
             let content = sanitize_tokens(group.stream());
             TokenTree::Group(proc_macro2::Group::new(group.delimiter(), content))
-        },
+        }
         TokenTree::Ident(ident) if ident == "type" => {
-            let raw_type = quote! { r#type };
+            let raw_type = quote! {  type };
             raw_type.into_iter().next().unwrap()
-        },
+        }
         _ => token,
     }
 }

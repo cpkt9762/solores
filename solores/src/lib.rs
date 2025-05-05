@@ -5,10 +5,12 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Seek,
     path::PathBuf,
+    process::Command,
 };
 
 use clap::{command, Parser};
 use idl_format::{bincode::BincodeIdl, IdlFormat};
+use log_panics::Config;
 
 use crate::idl_format::{anchor::AnchorIdl, shank::ShankIdl};
 
@@ -143,14 +145,38 @@ pub fn main() {
     write_gitignore(&args).unwrap();
     write_cargotoml(&args, idl.as_ref()).unwrap();
     write_lib(&args, idl.as_ref()).unwrap();
-
     log::info!(
         "{} crate written to {}",
         args.output_crate_name,
         args.output_dir.to_string_lossy()
     );
+    //run_rustfmt_in_files(&[args.output_dir]).unwrap();
 }
 
+fn run_rustfmt_in_files(file_paths: &[PathBuf]) -> std::io::Result<()> {
+    for file_path in file_paths {
+        //cd 到文件夹
+        //cargo fmt
+        let status = if file_path.is_dir() {
+            println!("cd {}", file_path.display());
+            Command::new("cd").arg(file_path).status()?;
+            println!("cargo fmt");
+            Command::new("cargo").arg("fmt").status()?
+        } else {
+            // 对文件直接格式化
+            Command::new("rustfmt").arg(file_path).status()?
+        };
+
+        if !status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("rustfmt failed for path: {}", file_path.display()),
+            ));
+        }
+        log::info!("Successfully formatted path: {}", file_path.display());
+    }
+    Ok(())
+}
 pub fn load_idl(file: &mut File) -> Box<dyn IdlFormat> {
     if let Ok(shank_idl) = serde_json::from_reader::<&File, ShankIdl>(file) {
         if shank_idl.is_correct_idl_format() {
