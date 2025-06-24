@@ -220,10 +220,27 @@ impl ToTokens for TypedefStruct {
         })
     }
 }
+fn to_snake_case_with_underscores(name: &str) -> String {
+    let mut result = String::new();
+    let mut leading_underscores = String::new();
 
+    // 收集前导下划线
+    if name.starts_with('_') {
+        leading_underscores.push('_');
+    }
+
+    // 使用 convert_case 转换剩余部分
+    let rest = &name[leading_underscores.len()..];
+    let converted = rest.to_snake_case();
+
+    // 拼接前导下划线和转换后的部分
+    result.push_str(&leading_underscores);
+    result.push_str(&converted);
+    result
+}
 impl ToTokens for TypedefField {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let name = format_ident!("{}", self.name.to_snake_case());
+        let name = format_ident!("{}", to_snake_case_with_underscores(&self.name));
         let ty = &self.r#type;
         tokens.extend(quote! {
             #name: #ty

@@ -129,4 +129,34 @@ mod tests {
         // Check that the struct name is correct.
         assert!(generated_code.contains("pub struct TestEvent"));
     }
+    #[test]
+    fn test_event_type_to_tokens_with_pub_fields2() {
+        // Define some fields for the EventType struct.
+        let field1 = TypedefField {
+            name: "padding_0".to_string(),
+            r#type: TypedefFieldType::PrimitiveOrPubkey("u8".into()),
+        };
+
+        let field2 = TypedefField {
+            name: "_padding_0".to_string(),
+            r#type: TypedefFieldType::PrimitiveOrPubkey("u8".into()),
+        };
+        println!("field1: {:?}", field1);
+        println!("field2: {:?}", field2);
+
+        // Create an EventType with the fields.
+        let event_type = EventType {
+            name: "TestEvent".to_string(),
+            discriminator: Some([0; 8]),
+            fields: Some(vec![field1, field2]),
+        };
+
+        // Generate the tokens.
+        let mut tokens = proc_macro2::TokenStream::new();
+        event_type.to_tokens(&mut tokens);
+
+        // Convert the tokens to a string for comparison.
+        let generated_code = tokens.to_string();
+        println!("generated_code: {}", generated_code);
+    }
 }
