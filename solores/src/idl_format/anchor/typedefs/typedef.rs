@@ -122,6 +122,8 @@ where
 
     // Optional: Validate that the value is an object with a "name" field
     if !value.is_object() {
+        println!("value: {:?}", value);
+        return Ok(value);
         return Err(D::Error::custom("Expected a JSON object for 'defined'"));
     }
     if !value.get("name").and_then(|v| v.as_str()).is_some() {
@@ -252,12 +254,17 @@ impl ToTokens for TypedefFieldType {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty: TokenStream = match self {
             Self::PrimitiveOrPubkey(s) => primitive_or_pubkey_to_token(s).parse().unwrap(),
-            Self::defined(s) => s
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap()
-                .parse()
-                .unwrap(),
+            Self::defined(s) => {
+                if s.is_object() {
+                    s.get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap()
+                        .parse()
+                        .unwrap()
+                } else {
+                    s.as_str().unwrap().to_string().parse().unwrap()
+                }
+            }
             Self::array(a) => a.to_token_stream(),
             Self::vec(v) => quote! {
                 Vec<#v>

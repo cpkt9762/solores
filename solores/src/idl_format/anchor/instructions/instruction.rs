@@ -802,8 +802,10 @@ impl IxAccountEntry {
 #[serde(rename_all = "camelCase")]
 pub struct IxAccount {
     pub name: String,
-    pub is_mut: Option<bool>,
-    pub is_signer: Option<bool>,
+    is_mut: Option<bool>,
+    is_signer: Option<bool>,
+    writable: Option<bool>,
+    signer: Option<bool>,
 }
 
 impl IxAccount {
@@ -811,13 +813,21 @@ impl IxAccount {
         format_ident!("{}", self.name.to_snake_case())
     }
 
+    pub fn is_mut(&self) -> bool {
+        self.is_mut.unwrap_or(false) || self.writable.unwrap_or(false)
+    }
+
+    pub fn is_signer(&self) -> bool {
+        self.is_signer.unwrap_or(false) || self.signer.unwrap_or(false)
+    }
+
     pub fn is_privileged(&self) -> bool {
-        self.is_mut.unwrap_or(false) || self.is_signer.unwrap_or(false)
+        self.is_mut() || self.is_signer()
     }
 
     pub fn to_keys_account_meta_tokens(&self) -> TokenStream {
-        let is_writable_arg = LitBool::new(self.is_mut.unwrap_or(false), Span::call_site());
-        let is_signer_arg = LitBool::new(self.is_signer.unwrap_or(false), Span::call_site());
+        let is_writable_arg = LitBool::new(self.is_mut(), Span::call_site());
+        let is_signer_arg = LitBool::new(self.is_signer(), Span::call_site());
         let name = self.field_ident();
         quote! {
             AccountMeta {

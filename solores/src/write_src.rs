@@ -55,7 +55,9 @@ pub fn write_lib(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
         });
         let mut module_contents = module.gen_head();
         module_contents.extend(module.gen_body());
+
         write_src_file(args, &format!("src/{module_name}.rs"), module_contents)?;
+        println!("write_src_file done: {}", module_name);
     }
 
     write_src_file(args, "src/lib.rs", contents)
@@ -77,7 +79,6 @@ fn write_src_file<P: AsRef<Path>>(
         }
     };
     let formatted = prettyplease::unparse(&unpretty);
-
     let path = args.output_dir.join(src_file_path);
     let mut file = open_file_create_overwrite(path)?;
     file.write_all(formatted.as_bytes())?;
