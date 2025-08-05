@@ -18,6 +18,8 @@ use crate::utils::{
 #[derive(Deserialize, Debug)]
 pub struct NamedType {
     pub name: String,
+    #[serde(default)]
+    pub docs: Option<Vec<String>>,
     pub discriminator: Option<[u8; 8]>,
     pub r#type: Option<TypedefType>,
 }
@@ -25,38 +27,226 @@ pub struct NamedType {
 impl NamedType {
     pub fn to_token_stream(&self, cli_args: &crate::Args) -> TokenStream {
         let name = format_ident!("{}", conditional_pascal_case(&self.name));
+        
+        // Generate documentation comments if present
+        let doc_comments = if let Some(docs) = &self.docs {
+            let doc_tokens: Vec<TokenStream> = docs
+                .iter()
+                .filter(|doc| !doc.trim().is_empty())
+                .map(|doc| {
+                    let doc_str = doc.trim();
+                    quote! { #[doc = #doc_str] }
+                })
+                .collect();
+            quote! { #(#doc_tokens)* }
+        } else {
+            quote! {}
+        };
 
         let token_stream = match &self.r#type {
             Some(TypedefType::r#struct(typedef_struct)) => {
                 let derive = if cli_args.zero_copy.iter().any(|e| e == &self.name) {
                     quote! {
                         #[repr(C)]
-                        #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Pod, Copy, Zeroable)]
+                        #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq, Pod, Copy, Zeroable)]
                     }
                 } else {
-                    quote! {
-                        #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+                    // Check if the struct has complex types that need custom Default implementation
+                    let has_complex_types = typedef_struct.fields.iter().any(|field| {
+                        match &field.r#type {
+                            TypedefFieldType::PrimitiveOrPubkey(s) if s == "publicKey" || s == "Pubkey" => true,
+                            TypedefFieldType::defined(_) => true,
+                            TypedefFieldType::array(_) => true,
+                            TypedefFieldType::vec(_) => true,
+                            TypedefFieldType::option(_) => true,
+                            _ => false,
+                        }
+                    });
+                    
+                    if has_complex_types {
+                        // Don't derive Default, we'll implement it manually
+                        quote! {
+                            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                        }
+                    } else {
+                        // Simple types can use derive Default
+                        quote! {
+                            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq, Default)]
+                        }
                     }
+                };
+
+                // Add discriminator field if present
+                let discriminator_field = if let Some(disc) = &self.discriminator {
+                    quote! { pub discriminator: [u8; 8], }
+                } else {
+                    quote! {}
+                };
+
+                // Generate custom Default implementation if needed
+                let custom_default_impl = if !cli_args.zero_copy.iter().any(|e| e == &self.name) {
+                    let has_complex_types = typedef_struct.fields.iter().any(|field| {
+                        match &field.r#type {
+                            TypedefFieldType::PrimitiveOrPubkey(s) if s == "publicKey" || s == "Pubkey" => true,
+                            TypedefFieldType::defined(_) => true,
+                            TypedefFieldType::array(_) => true,
+                            TypedefFieldType::vec(_) => true,
+                            TypedefFieldType::option(_) => true,
+                            _ => false,
+                        }
+                    });
+                    
+                    if has_complex_types {
+                        let default_fields = typedef_struct.fields.iter().map(|field| {
+                            let field_name = to_snake_case_with_underscores(&field.name);
+                            let name = if is_rust_keyword(&field_name) {
+                                format_ident!("r#{}", field_name)
+                            } else {
+                                format_ident!("{}", field_name)
+                            };
+                            
+                            let default_value = match &field.r#type {
+                                TypedefFieldType::PrimitiveOrPubkey(s) if s == "publicKey" || s == "Pubkey" => {
+                                    quote! { Pubkey::default() }
+                                }
+                                TypedefFieldType::array(TypedefFieldArray(inner_type, size)) => {
+                                    let size_literal = proc_macro2::Literal::usize_unsuffixed(*size as usize);
+                                    // Check if inner type is Copy-able primitive
+                                    match &**inner_type {
+                                        TypedefFieldType::PrimitiveOrPubkey(s) => {
+                                            match s.as_str() {
+                                                "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "bool" => {
+                                                    quote! { [Default::default(); #size_literal] }
+                                                }
+                                                _ => {
+                                                    // For non-primitive array elements (including Pubkey and custom types)
+                                                    quote! { core::array::from_fn(|_| Default::default()) }
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // For complex array element types
+                                            quote! { core::array::from_fn(|_| Default::default()) }
+                                        }
+                                    }
+                                }
+                                TypedefFieldType::vec(_) => {
+                                    quote! { Vec::new() }
+                                }
+                                TypedefFieldType::option(_) => {
+                                    quote! { None }
+                                }
+                                TypedefFieldType::defined(_) => {
+                                    quote! { Default::default() }
+                                }
+                                _ => {
+                                    quote! { Default::default() }
+                                }
+                            };
+                            
+                            quote! { #name: #default_value }
+                        });
+                        
+                        let discriminator_default = if self.discriminator.is_some() {
+                            quote! { discriminator: [0u8; 8], }
+                        } else {
+                            quote! {}
+                        };
+                        
+                        quote! {
+                            impl Default for #name {
+                                fn default() -> Self {
+                                    Self {
+                                        #discriminator_default
+                                        #(#default_fields),*
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        quote! {}
+                    }
+                } else {
+                    quote! {}
                 };
 
                 // 在 `TypedefStruct` 分支中直接生成 TokenStream
                 quote! {
+                    #doc_comments
                     #derive
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #name {
+                        #discriminator_field
                         #typedef_struct
                     }
+                    
+                    #custom_default_impl
                 }
             }
 
             Some(TypedefType::r#enum(typedef_enum)) => {
+                // Generate Default implementation for enum using first variant
+                let first_variant_default = if !typedef_enum.variants.is_empty() {
+                    let first_variant = &typedef_enum.variants[0];
+                    let variant_name = format_ident!("{}", conditional_pascal_case(&first_variant.name));
+                    
+                    // Check variant type and generate appropriate default value
+                    let default_value = if let Some(ref fields) = first_variant.fields {
+                        match fields {
+                            EnumVariantFields::Struct(struct_fields) => {
+                                if struct_fields.is_empty() {
+                                    // Empty struct variant
+                                    quote! { Self::#variant_name }
+                                } else {
+                                    // Struct variant with named fields
+                                    let field_defaults: Vec<_> = struct_fields.iter().map(|field| {
+                                        // Convert field name to snake_case to match the actual field name
+                                        let snake_case_name = to_snake_case_with_underscores(&field.name);
+                                        let field_name = format_ident!("{}", &snake_case_name);
+                                        quote! { #field_name: Default::default() }
+                                    }).collect();
+                                    quote! { Self::#variant_name { #(#field_defaults),* } }
+                                }
+                            },
+                            EnumVariantFields::Tuple(tuple_fields) => {
+                                if tuple_fields.is_empty() {
+                                    // Empty tuple variant
+                                    quote! { Self::#variant_name }
+                                } else {
+                                    // Tuple variant with positional fields
+                                    let field_defaults: Vec<_> = tuple_fields.iter().map(|_| {
+                                        quote! { Default::default() }
+                                    }).collect();
+                                    quote! { Self::#variant_name(#(#field_defaults),*) }
+                                }
+                            }
+                        }
+                    } else {
+                        // Unit variant (no fields property)
+                        quote! { Self::#variant_name }
+                    };
+                    
+                    quote! {
+                        impl Default for #name {
+                            fn default() -> Self {
+                                #default_value
+                            }
+                        }
+                    }
+                } else {
+                    quote! {}  // No variants, no Default impl
+                };
+                
                 // 为 enum 生成 TokenStream
                 quote! {
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+                    #doc_comments
+                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub enum #name {
                         #typedef_enum
                     }
+                    
+                    #first_variant_default
                 }
             }
 
@@ -73,6 +263,7 @@ impl NamedType {
                     };
                     // 生成类型别名的 TokenStream
                     quote! {
+                        #doc_comments
                         pub type #name = [#inner_type; #size];
                     }
                 } else {
@@ -109,6 +300,8 @@ pub struct TypedefStruct {
 #[derive(Deserialize, Debug)]
 pub struct TypedefField {
     pub name: String,
+    #[serde(default)]
+    pub docs: Option<Vec<String>>,
     #[serde(deserialize_with = "string_or_struct")]
     pub r#type: TypedefFieldType,
 }
@@ -155,14 +348,14 @@ pub enum TypedefFieldType {
 
 #[derive(Deserialize, Debug)]
 pub struct TypedefFieldArray(
-    #[serde(deserialize_with = "string_or_struct")] Box<TypedefFieldType>,
-    u32, // borsh spec says array sizes are u32
+    #[serde(deserialize_with = "string_or_struct")] pub Box<TypedefFieldType>,
+    pub u32, // borsh spec says array sizes are u32
 );
 
 /// serde newtype workaround for use in Vec<TypedefFieldType>:
 /// https://github.com/serde-rs/serde/issues/723#issuecomment-871016087
 #[derive(Deserialize, Debug)]
-pub struct TypedefFieldTypeWrap(#[serde(deserialize_with = "string_or_struct")] TypedefFieldType);
+pub struct TypedefFieldTypeWrap(#[serde(deserialize_with = "string_or_struct")] pub TypedefFieldType);
 
 impl FromStr for TypedefFieldType {
     type Err = Void;
@@ -216,7 +409,7 @@ pub struct EnumVariant {
 
 impl ToTokens for TypedefStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let typedef_fields = self.fields.iter().map(|f| quote! { pub #f });
+        let typedef_fields = &self.fields;
         tokens.extend(quote! {
             #(#typedef_fields),*
         })
@@ -240,13 +433,89 @@ fn to_snake_case_with_underscores(name: &str) -> String {
     result.push_str(&converted);
     result
 }
+
+fn is_rust_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "as" | "async" | "await" | "break" | "const" | "continue" | "crate" | "dyn" 
+        | "else" | "enum" | "extern" | "false" | "fn" | "for" | "if" | "impl" 
+        | "in" | "let" | "loop" | "match" | "mod" | "move" | "mut" | "pub" 
+        | "ref" | "return" | "self" | "Self" | "static" | "struct" | "super" 
+        | "trait" | "true" | "type" | "unsafe" | "use" | "where" | "while"
+        | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override"
+        | "priv" | "typeof" | "unsized" | "virtual" | "yield" | "try"
+    )
+}
+impl TypedefField {
+    // 为结构体字段生成tokens（带pub）
+    pub fn to_struct_field_tokens(&self) -> TokenStream {
+        let field_name = to_snake_case_with_underscores(&self.name);
+        // Handle reserved keywords by using raw identifier syntax
+        let name = if is_rust_keyword(&field_name) {
+            format_ident!("r#{}", field_name)
+        } else {
+            format_ident!("{}", field_name)
+        };
+        let ty = &self.r#type;
+        
+        // Generate documentation comments from IDL field docs
+        let doc_comments = if let Some(docs) = &self.docs {
+            let doc_tokens: Vec<TokenStream> = docs
+                .iter()
+                .filter(|doc| !doc.trim().is_empty())
+                .map(|doc| {
+                    let doc_str = doc.trim();
+                    quote! { #[doc = #doc_str] }
+                })
+                .collect();
+            quote! { #(#doc_tokens)* }
+        } else {
+            quote! {}
+        };
+        
+        quote! {
+            #doc_comments
+            pub #name: #ty
+        }
+    }
+    
+    // 为enum变体字段生成tokens（不带pub）
+    fn to_enum_field_tokens(&self) -> TokenStream {
+        let field_name = to_snake_case_with_underscores(&self.name);
+        // Handle reserved keywords by using raw identifier syntax
+        let name = if is_rust_keyword(&field_name) {
+            format_ident!("r#{}", field_name)
+        } else {
+            format_ident!("{}", field_name)
+        };
+        let ty = &self.r#type;
+        
+        // Generate documentation comments from IDL field docs
+        let doc_comments = if let Some(docs) = &self.docs {
+            let doc_tokens: Vec<TokenStream> = docs
+                .iter()
+                .filter(|doc| !doc.trim().is_empty())
+                .map(|doc| {
+                    let doc_str = doc.trim();
+                    quote! { #[doc = #doc_str] }
+                })
+                .collect();
+            quote! { #(#doc_tokens)* }
+        } else {
+            quote! {}
+        };
+        
+        quote! {
+            #doc_comments
+            #name: #ty
+        }
+    }
+}
+
 impl ToTokens for TypedefField {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let name = format_ident!("{}", to_snake_case_with_underscores(&self.name));
-        let ty = &self.r#type;
-        tokens.extend(quote! {
-            #name: #ty
-        })
+        // 默认行为：为结构体字段生成带pub的tokens
+        tokens.extend(self.to_struct_field_tokens())
     }
 }
 
@@ -262,7 +531,26 @@ impl ToTokens for TypedefFieldType {
                         .parse()
                         .unwrap()
                 } else {
-                    s.as_str().unwrap().to_string().parse().unwrap()
+                    let type_str = s.as_str().unwrap();
+                    // Special handling for SmallVec - map to Vec
+                    if type_str.starts_with("SmallVec<") {
+                        // Extract the first type parameter from SmallVec<T,N>
+                        // e.g., "SmallVec<u8,u8>" -> "Vec<u8>"
+                        if let Some(start) = type_str.find('<') {
+                            if let Some(comma) = type_str.find(',') {
+                                let inner_type = &type_str[start+1..comma];
+                                format!("Vec<{}>", inner_type).parse().unwrap()
+                            } else {
+                                // Fallback if format is unexpected
+                                "Vec<u8>".parse().unwrap()
+                            }
+                        } else {
+                            // Fallback if format is unexpected
+                            "Vec<u8>".parse().unwrap()
+                        }
+                    } else {
+                        type_str.to_string().parse().unwrap()
+                    }
                 }
             }
             Self::array(a) => a.to_token_stream(),
@@ -304,9 +592,10 @@ impl ToTokens for EnumVariant {
             .as_ref()
             .map_or(quote! {}, |fields| match fields {
                 EnumVariantFields::Struct(v) => {
-                    let typedef_fields = v.iter();
+                    // 使用enum字段专用的生成方法（不带pub）
+                    let enum_fields = v.iter().map(|f| f.to_enum_field_tokens());
                     quote! {
-                        { #(#typedef_fields),* }
+                        { #(#enum_fields),* }
                     }
                 }
                 EnumVariantFields::Tuple(v) => {

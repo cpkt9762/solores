@@ -50,16 +50,6 @@ impl IdlCodegenModule for IxCodegenModule<'_> {
                 pubkey::Pubkey,
             }
         };
-        let has_privileged_accounts = self
-            .instructions
-            .iter()
-            .map(|ix| ix.has_privileged_accounts())
-            .any(|b| b);
-        if has_privileged_accounts {
-            solana_program_imports.extend(quote! {
-                program_error::ProgramError,
-            });
-        }
         res.extend(quote! {
             use solana_program::{#solana_program_imports};
             use std::io::Read;

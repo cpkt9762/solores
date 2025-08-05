@@ -1,1 +1,14 @@
 /target
+# Generated output directories
+/batch_output/
+/test_output/
+/test_single/
+/comparison_output/
+/all_interfaces_output/
+/quality_logs/
+
+# IDE and personal configuration
+CLAUDE.md
+
+# Test files
+test_discriminator_validation.rs

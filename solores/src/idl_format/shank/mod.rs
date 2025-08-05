@@ -120,4 +120,9 @@ impl IdlFormat for ShankIdl {
         }
         map
     }
+
+    fn is_anchor_contract(&self) -> bool {
+        // Shank-generated IDLs are not Anchor contracts
+        false
+    }
 }

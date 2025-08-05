@@ -97,4 +97,9 @@ impl IdlFormat for BincodeIdl {
         }
         map
     }
+
+    fn is_anchor_contract(&self) -> bool {
+        // Bincode IDLs are not Anchor contracts
+        false
+    }
 }

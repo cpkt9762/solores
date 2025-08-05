@@ -21,16 +21,7 @@ pub fn primitive_or_pubkey_to_token(s: &str) -> String {
     match s {
         "publicKey" | "pubkey" | "Pubkey" => PUBKEY_TOKEN.to_owned(),
         "string" => s.to_pascal_case(),
-        "bytes" => {
-            #[cfg(feature = "bytes_to_u8")]
-            {
-                "u8".to_owned()
-            }
-            #[cfg(not(feature = "bytes_to_u8"))]
-            {
-                "bytes".to_owned()
-            }
-        }
+        "bytes" => "Vec<u8>".to_owned(),
         _ => s.to_owned(),
     }
 }

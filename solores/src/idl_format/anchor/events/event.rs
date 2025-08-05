@@ -12,6 +12,8 @@ pub struct Event(pub EventType);
 #[derive(Deserialize, Debug)]
 pub struct EventType {
     pub name: String,
+    #[serde(default)]
+    pub docs: Option<Vec<String>>,
     pub discriminator: Option<[u8; 8]>,
     // NB: theres also an `index` field that's ignored for now since we dk what it does:
     // https://github.com/coral-xyz/anchor/blob/8f30f00ec363b7e82aa0b3c7041e912919b33cf5/lang/attribute/event/src/lib.rs#L62C1-L64
@@ -83,7 +85,7 @@ impl ToTokens for EventType {
             tokens.extend(quote! {
                 #[derive(Clone, Debug, PartialEq, BorshDeserialize, BorshSerialize)]
                 pub struct #struct_ident {
-                    #(pub #struct_fields),*
+                    #(#struct_fields),*
                 }
             });
         }
@@ -100,17 +102,20 @@ mod tests {
         // Define some fields for the EventType struct.
         let field1 = TypedefField {
             name: "field1".to_string(),
+            docs: None,
             r#type: TypedefFieldType::PrimitiveOrPubkey("u32".into()),
         };
 
         let field2 = TypedefField {
             name: "field2".to_string(),
+            docs: None,
             r#type: TypedefFieldType::PrimitiveOrPubkey("String".into()),
         };
 
         // Create an EventType with the fields.
         let event_type = EventType {
             name: "TestEvent".to_string(),
+            docs: None,
             discriminator: Some([0; 8]),
             fields: Some(vec![field1, field2]),
         };
@@ -122,9 +127,9 @@ mod tests {
         // Convert the tokens to a string for comparison.
         let generated_code = tokens.to_string();
 
-        // Check that the generated code includes "pub" for each field.
-        assert!(generated_code.contains("pub field1 : u32"));
-        assert!(generated_code.contains("pub field2 : String"));
+        // Check that the generated code includes fields (TypedefField already adds pub).
+        assert!(generated_code.contains("field1 : u32"));
+        assert!(generated_code.contains("field2 : String"));
 
         // Check that the struct name is correct.
         assert!(generated_code.contains("pub struct TestEvent"));
@@ -134,11 +139,13 @@ mod tests {
         // Define some fields for the EventType struct.
         let field1 = TypedefField {
             name: "padding_0".to_string(),
+            docs: None,
             r#type: TypedefFieldType::PrimitiveOrPubkey("u8".into()),
         };
 
         let field2 = TypedefField {
             name: "_padding_0".to_string(),
+            docs: None,
             r#type: TypedefFieldType::PrimitiveOrPubkey("u8".into()),
         };
         println!("field1: {:?}", field1);
@@ -147,6 +154,7 @@ mod tests {
         // Create an EventType with the fields.
         let event_type = EventType {
             name: "TestEvent".to_string(),
+            docs: None,
             discriminator: Some([0; 8]),
             fields: Some(vec![field1, field2]),
         };

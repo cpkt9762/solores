@@ -8,6 +8,7 @@ use crate::{idl_format::IdlFormat, utils::open_file_create_overwrite, Args};
 pub const BORSH_CRATE: &str = "borsh";
 pub const BYTEMUCK_CRATE: &str = "bytemuck";
 pub const SERDE_CRATE: &str = "serde";
+pub const SERDE_WITH_CRATE: &str = "serde_with";
 pub const SOLANA_PROGRAM_CRATE: &str = "solana-program";
 pub const THISERROR_CRATE: &str = "thiserror";
 pub const NUM_DERIVE_CRATE: &str = "num-derive";
@@ -26,18 +27,31 @@ pub fn write_cargotoml(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> 
 #[derive(Serialize)]
 pub struct CargoToml<'a> {
     pub package: Package<'a>,
+    pub workspace: Map<String, Value>,
     pub dependencies: Map<String, Value>,
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub features: Map<String, Value>,
 }
 
 impl<'a> CargoToml<'a> {
     pub fn from_args_and_idl(args: &'a Args, idl: &'a dyn IdlFormat) -> Self {
+        let workspace = Map::new(); // This will create [workspace] with no contents due to the empty map
+
+        let mut features = Map::new();
+        let mut serde_features = Vec::new();
+        serde_features.push(Value::String("dep:serde".to_string()));
+        serde_features.push(Value::String("dep:serde_with".to_string()));
+        features.insert("serde".to_string(), Value::Array(serde_features));
+
         Self {
             package: Package {
                 name: &args.output_crate_name,
                 version: idl.program_version(),
                 edition: "2021",
             },
+            workspace,
             dependencies: idl.dependencies(args),
+            features,
         }
     }
 }

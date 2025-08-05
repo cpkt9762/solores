@@ -19,11 +19,7 @@ impl IdlCodegenModule for ErrorsCodegenModule<'_> {
 
     fn gen_head(&self) -> TokenStream {
         quote! {
-            use solana_program::{
-                decode_error::DecodeError,
-                msg,
-                program_error::{PrintProgramError, ProgramError},
-            };
+            use solana_program::program_error::ProgramError;
             use thiserror::Error;
         }
     }
@@ -37,7 +33,12 @@ impl IdlCodegenModule for ErrorsCodegenModule<'_> {
 
         let error_enum_ident_str = format!("{}Error", self.program_name.to_pascal_case());
         let error_enum_ident = format_ident!("{}", &error_enum_ident_str);
+        
+        // Generate documentation for the error enum
+        let error_enum_doc = format!("Custom errors for the {} program", self.program_name);
+        
         quote! {
+            #[doc = #error_enum_doc]
             #[derive(Clone, Copy, Debug, Eq, Error, num_derive::FromPrimitive, PartialEq)]
             pub enum #error_enum_ident {
                 #error_enum_variants
@@ -46,25 +47,6 @@ impl IdlCodegenModule for ErrorsCodegenModule<'_> {
             impl From<#error_enum_ident> for ProgramError {
                 fn from(e: #error_enum_ident) -> Self {
                     ProgramError::Custom(e as u32)
-                }
-            }
-
-            impl<T> DecodeError<T> for #error_enum_ident {
-                fn type_of() -> &'static str {
-                    #error_enum_ident_str
-                }
-            }
-
-            impl PrintProgramError for #error_enum_ident {
-                fn print<E>(&self)
-                where
-                    E: 'static
-                        + std::error::Error
-                        + DecodeError<E>
-                        + PrintProgramError
-                        + num_traits::FromPrimitive,
-                {
-                    msg!(&self.to_string());
                 }
             }
         }

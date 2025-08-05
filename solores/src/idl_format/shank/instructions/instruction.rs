@@ -85,14 +85,6 @@ impl NamedInstruction {
         args.iter().map(|a| a.r#type.is_or_has_pubkey()).any(|b| b)
     }
 
-    pub fn has_privileged_accounts(&self) -> bool {
-        let accounts = if !self.has_accounts() {
-            return false;
-        } else {
-            self.accounts.as_ref().unwrap()
-        };
-        accounts.iter().map(|a| a.is_privileged()).any(|b| b)
-    }
 
     /// export accounts_len as const
     pub fn write_accounts_len(&self, tokens: &mut TokenStream, accounts_len: usize) {
@@ -620,104 +612,6 @@ impl NamedInstruction {
         });
     }
 
-    // _verify_account_privileges()
-    // _verify_writable_privileges()
-    // _verify_signer_privileges()
-    pub fn write_verify_account_privileges_fns(
-        &self,
-        tokens: &mut TokenStream,
-        accounts: &[IxAccount],
-    ) {
-        if !self.has_privileged_accounts() {
-            return;
-        }
-        let verify_account_privileges_fn_ident =
-            format_ident!("{}_verify_account_privileges", self.name.to_snake_case());
-        let verify_writable_privileges_fn_ident =
-            format_ident!("{}_verify_writable_privileges", self.name.to_snake_case());
-        let verify_signer_privileges_fn_ident =
-            format_ident!("{}_verify_signer_privileges", self.name.to_snake_case());
-        let accounts_ident = self.accounts_ident();
-
-        let mut verify_fn_body = quote! {};
-
-        let mut writables = accounts
-            .iter()
-            .filter_map(|a| {
-                if a.is_mut {
-                    let name = a.field_ident();
-                    Some(quote! {
-                        accounts.#name
-                    })
-                } else {
-                    None
-                }
-            })
-            .peekable();
-        let has_writables = writables.peek().is_some();
-        if has_writables {
-            tokens.extend(quote! {
-                pub fn #verify_writable_privileges_fn_ident<'me, 'info>(
-                    accounts: #accounts_ident<'me, 'info>,
-                ) -> Result<(), (&'me AccountInfo<'info>, ProgramError)> {
-                    for should_be_writable in [
-                        #(#writables),*
-                    ] {
-                        if !should_be_writable.is_writable {
-                            return Err((should_be_writable, ProgramError::InvalidAccountData));
-                        }
-                    }
-                    Ok(())
-                }
-            });
-            verify_fn_body.extend(quote! {
-                #verify_writable_privileges_fn_ident(accounts)?;
-            });
-        }
-
-        let mut signers = accounts
-            .iter()
-            .filter_map(|a| {
-                if a.is_signer {
-                    let name = a.field_ident();
-                    Some(quote! {
-                        accounts.#name
-                    })
-                } else {
-                    None
-                }
-            })
-            .peekable();
-        let has_signers = signers.peek().is_some();
-        if has_signers {
-            tokens.extend(quote! {
-                pub fn #verify_signer_privileges_fn_ident<'me, 'info>(
-                    accounts: #accounts_ident<'me, 'info>,
-                ) -> Result<(), (&'me AccountInfo<'info>, ProgramError)> {
-                    for should_be_signer in [
-                        #(#signers),*
-                    ] {
-                        if !should_be_signer.is_signer {
-                            return Err((should_be_signer, ProgramError::MissingRequiredSignature));
-                        }
-                    }
-                    Ok(())
-                }
-            });
-            verify_fn_body.extend(quote! {
-                #verify_signer_privileges_fn_ident(accounts)?;
-            });
-        }
-
-        tokens.extend(quote! {
-            pub fn #verify_account_privileges_fn_ident<'me, 'info>(
-                accounts: #accounts_ident<'me, 'info>,
-            ) -> Result<(), (&'me AccountInfo<'info>, ProgramError)> {
-                #verify_fn_body
-                Ok(())
-            }
-        });
-    }
 }
 
 impl ToTokens for NamedInstruction {
@@ -758,7 +652,6 @@ impl ToTokens for NamedInstruction {
         self.write_invoke_signed_fn(tokens);
 
         self.write_verify_account_keys_fn(tokens, accounts);
-        self.write_verify_account_privileges_fns(tokens, accounts);
     }
 }
 
@@ -776,9 +669,6 @@ impl IxAccount {
         format_ident!("{}", self.name.to_snake_case())
     }
 
-    pub fn is_privileged(&self) -> bool {
-        self.is_mut || self.is_signer
-    }
 
     pub fn to_keys_account_meta_tokens(&self) -> TokenStream {
         let is_writable_arg = LitBool::new(self.is_mut, Span::call_site());
