@@ -1,0 +1,23 @@
+[package]
+name = "sol_stable_swap_interface"
+version = "1.5.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies.borsh]
+version = "^1.5"
+
+[dependencies.serde]
+optional = true
+version = "^1.0"
+
+[dependencies.serde_with]
+optional = true
+version = "^3.0"
+
+[dependencies.solana-program]
+version = "^2.0"
+
+[features]
+serde = ["dep:serde", "dep:serde_with"]
