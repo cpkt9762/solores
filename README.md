@@ -1,6 +1,5 @@
 # Solores - Solana IDL to Rust Interface Generator
 
-[![Crates.io](https://img.shields.io/crates/v/solores.svg)](https://crates.io/crates/solores)
 [![Documentation](https://docs.rs/solores/badge.svg)](https://docs.rs/solores)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -27,11 +26,7 @@ Successfully generates fully compilable interfaces for:
 
 ## 📦 Installation
 
-```bash
-cargo install solores
-```
-
-Or build from source:
+Build from source:
 
 ```bash
 git clone https://github.com/your-username/solores
