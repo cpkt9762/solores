@@ -115,6 +115,33 @@ pub fn conditional_pascal_case(s: &str) -> String {
     }
 }
 
+/// 将字段名转换为安全的Rust标识符，处理关键字
+pub fn sanitize_field_name(field_name: &str) -> String {
+    // Rust关键字列表
+    const RUST_KEYWORDS: &[&str] = &[
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern",
+        "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod",
+        "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct",
+        "super", "trait", "true", "type", "unsafe", "use", "where", "while",
+        "async", "await", "dyn", "abstract", "become", "box", "do", "final",
+        "macro", "override", "priv", "typeof", "unsized", "virtual", "yield",
+        "try",
+    ];
+    
+    if RUST_KEYWORDS.contains(&field_name) {
+        // 使用后缀避免关键字冲突，而不是raw identifier
+        format!("{}_field", field_name)
+    } else {
+        field_name.to_string()
+    }
+}
+
+/// 创建安全的Rust标识符
+pub fn create_safe_ident(field_name: &str) -> syn::Ident {
+    let safe_name = sanitize_field_name(field_name);
+    syn::Ident::new(&safe_name, proc_macro2::Span::call_site())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

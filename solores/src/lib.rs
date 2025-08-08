@@ -9,22 +9,21 @@ use std::{
 };
 
 use clap::{command, Parser};
-use idl_format::{bincode::BincodeIdl, IdlFormat};
+use idl_format::{IdlFormat, IdlFormatEnum, parse_idl_json};
 
 use crate::error::{SoloresError, diagnose_json_error, validate_idl_structure, format_user_error};
-use crate::idl_format::{anchor::AnchorIdl, shank::ShankIdl};
 
 // Just make all mods pub to allow ppl to use the lib
 
 pub mod error;
 pub mod idl_format;
+pub mod templates;  // 新增模板系统
 pub mod utils;
-pub mod write_cargotoml;
 pub mod write_gitignore;
 pub mod write_readme;
 pub mod write_src;
 
-use write_cargotoml::write_cargotoml;
+use templates::common::cargo_generator::write_fine_grained_cargo_toml;
 use write_gitignore::write_gitignore;
 use write_readme::write_readme;
 use write_src::*;
@@ -123,7 +122,8 @@ pub struct Args {
 
     #[arg(
         long,
-        help = "generate parser functions for account and instruction parsing"
+        default_value = "true",
+        help = "generate parser functions for account and instruction parsing (enabled by default)"
     )]
     pub generate_parser: bool,
 
@@ -187,7 +187,7 @@ fn process_single_file(mut args: Args) {
 
     // TODO: multithread, 1 thread per generated file
     write_gitignore(&args).unwrap();
-    write_cargotoml(&args, idl.as_ref()).unwrap();
+    write_fine_grained_cargo_toml(&args, idl.as_ref()).unwrap();
     
     log::info!("Writing lib.rs for IDL: {}", idl.program_name());
     log::debug!("IDL address: {:?}", idl.program_address());
@@ -207,6 +207,18 @@ fn process_single_file(mut args: Args) {
     }
     
     // Format generated code with cargo fmt
+    log::debug!("🎨 准备运行cargo fmt...");
+    
+    // 检查格式化前的一个样本文件
+    let sample_instruction_file = args.output_dir.join("src/instructions").join("create_platform_config.rs");
+    let use_count_before = if sample_instruction_file.exists() {
+        let content = std::fs::read_to_string(&sample_instruction_file).unwrap_or_default();
+        content.matches("use crate::*").count()
+    } else {
+        0
+    };
+    log::debug!("🎨 格式化前样本文件 use crate::* 数量: {}", use_count_before);
+    
     let fmt_result = Command::new("cargo")
         .args(&["fmt"])
         .current_dir(&args.output_dir)
@@ -215,6 +227,19 @@ fn process_single_file(mut args: Args) {
     match fmt_result {
         Ok(output) => {
             if output.status.success() {
+                // 检查格式化后的同一个样本文件
+                let use_count_after = if sample_instruction_file.exists() {
+                    let content = std::fs::read_to_string(&sample_instruction_file).unwrap_or_default();
+                    content.matches("use crate::*").count()
+                } else {
+                    0
+                };
+                log::debug!("🎨 格式化后样本文件 use crate::* 数量: {}", use_count_after);
+                
+                if use_count_before != use_count_after {
+                    log::warn!("⚠️ cargo fmt改变了导入数量！前: {}, 后: {}", use_count_before, use_count_after);
+                }
+                
                 log::info!("Code formatted successfully with cargo fmt");
             } else {
                 log::warn!("cargo fmt failed: {}", String::from_utf8_lossy(&output.stderr));
@@ -373,7 +398,7 @@ fn process_single_idl_file(base_args: &Args, idl_file_path: &PathBuf) -> Result<
         return Err(format!("生成.gitignore失败: {}", e));
     }
 
-    if let Err(e) = write_cargotoml(&args, idl.as_ref()) {
+    if let Err(e) = write_fine_grained_cargo_toml(&args, idl.as_ref()) {
         return Err(format!("生成Cargo.toml失败: {}", e));
     }
 
@@ -445,52 +470,25 @@ pub fn load_idl_with_diagnostics(file: &mut File) -> Result<Box<dyn IdlFormat>, 
     try_parse_idl_formats(&content)
 }
 
-/// 尝试解析不同的IDL格式
+/// 尝试解析不同的IDL格式（使用新的二元架构）
 fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresError> {
-    log::debug!("尝试解析Shank IDL格式");
+    log::debug!("使用新的二元架构解析IDL格式");
     
-    // 尝试Shank格式
-    match serde_json::from_str::<ShankIdl>(content) {
-        Ok(shank_idl) => {
-            if shank_idl.is_correct_idl_format() {
-                log::info!("✓ 成功加载Shank IDL格式");
-                return Ok(Box::new(shank_idl));
-            } else {
-                log::debug!("Shank格式校验失败，继续尝试其他格式");
+    // 使用统一的IDL解析接口
+    match parse_idl_json(content) {
+        Ok(idl_format) => {
+            match &idl_format {
+                IdlFormatEnum::Anchor(anchor_idl) => {
+                    log::info!("✓ 成功加载Anchor IDL格式: {}", anchor_idl.program_name());
+                }
+                IdlFormatEnum::NonAnchor(non_anchor_idl) => {
+                    log::info!("✓ 成功加载NonAnchor IDL格式: {}", non_anchor_idl.program_name());
+                }
             }
+            Ok(Box::new(idl_format))
         }
         Err(e) => {
-            log::debug!("Shank格式解析失败: {}", e);
-        }
-    }
-    
-    log::debug!("尝试解析Bincode IDL格式");
-    
-    // 尝试Bincode格式  
-    match serde_json::from_str::<BincodeIdl>(content) {
-        Ok(bincode_idl) => {
-            if bincode_idl.is_correct_idl_format() {
-                log::info!("✓ 成功加载Bincode IDL格式");
-                return Ok(Box::new(bincode_idl));
-            } else {
-                log::debug!("Bincode格式校验失败，继续尝试其他格式");
-            }
-        }
-        Err(e) => {
-            log::debug!("Bincode格式解析失败: {}", e);
-        }
-    }
-    
-    log::debug!("尝试解析Anchor IDL格式");
-    
-    // 尝试Anchor格式（默认格式）
-    match serde_json::from_str::<AnchorIdl>(content) {
-        Ok(anchor_idl) => {
-            log::info!("✓ 成功加载Anchor IDL格式");
-            Ok(Box::new(anchor_idl))
-        }
-        Err(e) => {
-            log::error!("所有IDL格式解析都失败了");
+            log::error!("IDL格式解析失败");
             
             // 提供详细的错误诊断
             let error_msg = e.to_string();
@@ -527,9 +525,8 @@ fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresErr
                     details: format!("无法识别的IDL格式: {}", error_msg),
                     expected_format: Some(
                         "支持的格式包括:\n\
-                        - Anchor IDL (需要metadata.name字段)\n\
-                        - Shank IDL (需要根级别name字段)\n\
-                        - Bincode IDL (自定义格式)".to_string()
+                        - Anchor IDL (8字节discriminator)\n\
+                        - NonAnchor IDL (1字节discriminator或其他识别方式)".to_string()
                     ),
                 })
             }

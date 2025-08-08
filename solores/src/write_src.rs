@@ -132,12 +132,19 @@ pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<()
     // 2. 创建输出目录
     create_output_directories(args)?;
     
-    // 3. 生成程序ID声明
+    // 3. 生成程序ID声明 - 使用pubkey!替换declare_id!
     let program_id = get_program_id(args, idl);
     log::debug!("使用程序ID: {}", program_id);
     
     let mut contents = quote! {
-        solana_program::declare_id!(#program_id);
+        use solana_pubkey::{pubkey, Pubkey};
+        
+        pub static ID: Pubkey = pubkey!(#program_id);
+        
+        /// 获取程序ID
+        pub fn id() -> Pubkey {
+            ID
+        }
     };
     
     // 4. 生成模块
@@ -163,12 +170,8 @@ pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<()
             });
         }
         
-        // 生成模块文件
-        let module_result = if module.has_multiple_files() {
-            generate_multi_file_module(args, module.as_ref(), module_name)
-        } else {
-            generate_single_file_module(args, module.as_ref(), module_name, is_parser)
-        };
+        // 生成模块文件 - 统一使用多文件架构
+        let module_result = generate_multi_file_module(args, module.as_ref(), module_name);
         
         match module_result {
             Ok(()) => {
@@ -226,55 +229,42 @@ fn generate_multi_file_module(
 ) -> Result<(), SoloresError> {
     log::debug!("📁 生成多文件模块: {}", module_name);
     
-    // 创建模块目录
-    let module_dir = args.output_dir.join("src").join(module_name);
-    handle_file_operation("创建模块目录", &module_dir, || {
-        std::fs::create_dir_all(&module_dir)
-    })?;
+    // 检查是否是根目录单文件（如errors.rs）
+    // 直接使用IdlCodegenModule的has_multiple_files方法来判断
+    let has_multiple = module.has_multiple_files();
+    let is_root_file = !has_multiple && module_name == "errors";
+    log::debug!("🔍 模块{}的has_multiple_files()结果: {}, is_root_file: {}", module_name, has_multiple, is_root_file);
     
-    // 生成mod.rs文件
-    let mod_contents = module.gen_mod_file();
-    write_src_file_with_diagnostics(args, &format!("src/{}/mod.rs", module_name), mod_contents)?;
-    
-    // 生成各个文件
-    for (filename, file_contents) in module.gen_files() {
-        let file_path = format!("src/{}/{}", module_name, filename);
-        write_src_file_with_diagnostics(args, &file_path, file_contents)?;
+    if is_root_file {
+        // 根目录单文件模式：直接生成到src/目录下
+        log::debug!("🗂️  生成根目录单文件: {}", module_name);
+        
+        for (filename, file_contents) in module.gen_files() {
+            let file_path = format!("src/{}", filename);
+            write_src_file_with_diagnostics(args, &file_path, file_contents)?;
+        }
+    } else {
+        // 目录多文件模式：创建模块目录
+        let module_dir = args.output_dir.join("src").join(module_name);
+        handle_file_operation("创建模块目录", &module_dir, || {
+            std::fs::create_dir_all(&module_dir)
+        })?;
+        
+        // 生成mod.rs文件
+        let mod_contents = module.gen_mod_file();
+        write_src_file_with_diagnostics(args, &format!("src/{}/mod.rs", module_name), mod_contents)?;
+        
+        // 生成各个文件
+        for (filename, file_contents) in module.gen_files() {
+            let file_path = format!("src/{}/{}", module_name, filename);
+            write_src_file_with_diagnostics(args, &file_path, file_contents)?;
+        }
     }
     
     log::debug!("✅ 多文件模块{}生成完成", module_name);
     Ok(())
 }
 
-/// 生成单文件模块
-fn generate_single_file_module(
-    args: &Args, 
-    module: &dyn crate::idl_format::IdlCodegenModule, 
-    module_name: &str,
-    is_parser: bool
-) -> Result<(), SoloresError> {
-    log::debug!("📄 生成单文件模块: {}", module_name);
-    
-    let mut module_contents = module.gen_head();
-    module_contents.extend(module.gen_body());
-    
-    let file_path = if is_parser {
-        // Parser模块放在parsers/子目录中
-        let parsers_dir = args.output_dir.join("src").join("parsers");
-        handle_file_operation("创建parsers目录", &parsers_dir, || {
-            std::fs::create_dir_all(&parsers_dir)
-        })?;
-        
-        let parser_name = module_name.strip_suffix("_parser").unwrap_or(module_name);
-        format!("src/parsers/{}.rs", parser_name)
-    } else {
-        format!("src/{}.rs", module_name)
-    };
-    
-    write_src_file_with_diagnostics(args, &file_path, module_contents)?;
-    log::debug!("✅ 单文件模块{}生成完成", module_name);
-    Ok(())
-}
 
 /// 生成parsers/mod.rs文件
 fn generate_parsers_mod_file(args: &Args) -> Result<(), SoloresError> {
@@ -328,6 +318,20 @@ fn write_src_file_with_diagnostics<P: AsRef<Path>>(
     let path = src_file_path.as_ref();
     log::debug!("📝 写入文件: {}", path.display());
     
+    // 检查写入前的use crate::*数量
+    let content_str = contents.to_string();
+    let use_crate_count = content_str.matches("use crate::*").count();
+    log::debug!("📄 写入前检查 - use crate::* 出现次数: {}", use_crate_count);
+    
+    if use_crate_count > 1 {
+        log::warn!("⚠️ 检测到重复导入！详细内容:");
+        for (i, line) in content_str.lines().enumerate() {
+            if line.contains("use crate::*") {
+                log::warn!("  第{}行: {}", i+1, line.trim());
+            }
+        }
+    }
+    
     let sanitized_contents = sanitize_tokens(contents);
     
     // 验证生成的内容语法
@@ -338,6 +342,15 @@ fn write_src_file_with_diagnostics<P: AsRef<Path>>(
         log::error!("{}", sanitized_contents.to_string());
         log::error!("=== 第二个验证点TokenStream结束 ===");
         log::error!("第二个验证点语法错误详情: {}", e);
+        
+        // 写入调试文件以便详细分析
+        let debug_file_path = std::path::Path::new("/tmp/debug_tokenstream.rs");
+        let code = prettyplease::unparse(&syn::parse2(sanitized_contents.clone()).unwrap_or_else(|_| {
+            // 如果无法解析为 syn::File，尝试将其作为单个 TokenStream 输出
+            syn::parse_str::<syn::File>(&format!("mod debug {{ {} }}", sanitized_contents.to_string())).unwrap()
+        }));
+        std::fs::write(debug_file_path, code).ok();
+        log::error!("调试文件已写入: {}", debug_file_path.display());
         
         return Err(SoloresError::CodeGenError {
             module: path.display().to_string(),
