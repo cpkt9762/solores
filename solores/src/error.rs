@@ -27,6 +27,8 @@ pub enum SoloresError {
     FileOperationError { 
         operation: String, 
         path: String, 
+        current_dir: Option<String>,
+        resolved_path: Option<String>,
         source: std::io::Error,
         suggestion: Option<String>,
     },
@@ -105,9 +107,22 @@ impl SoloresError {
         path: impl Into<String>,
         source: std::io::Error
     ) -> Self {
+        let path_str = path.into();
+        let current_dir = std::env::current_dir()
+            .ok()
+            .map(|d| d.display().to_string());
+        let resolved_path = if let Some(ref current) = current_dir {
+            let current_path = std::path::PathBuf::from(current);
+            Some(current_path.join(&path_str).display().to_string())
+        } else {
+            None
+        };
+        
         Self::FileOperationError {
             operation: operation.into(),
-            path: path.into(),
+            path: path_str,
+            current_dir,
+            resolved_path,
             source,
             suggestion: None,
         }
@@ -242,12 +257,32 @@ pub fn format_user_error(error: &SoloresError) -> String {
             output
         }
         
-        SoloresError::FileOperationError { operation, path, source, suggestion } => {
-            let mut output = format!("❌ 文件操作失败:\n操作: {}\n路径: {}", operation, path);
+        SoloresError::FileOperationError { operation, path, current_dir, resolved_path, source, suggestion } => {
+            let mut output = format!("❌ 文件操作失败:\n操作: {}\n请求路径: {}", operation, path);
+            
+            // 显示当前工作目录
+            if let Some(cwd) = current_dir {
+                output.push_str(&format!("\n当前目录: {}", cwd));
+            }
+            
+            // 显示解析后的完整路径
+            if let Some(resolved) = resolved_path {
+                output.push_str(&format!("\n解析路径: {}", resolved));
+            }
             
             // 根据错误类型提供具体建议
             let specific_suggestion = match source.kind() {
-                std::io::ErrorKind::NotFound => "文件或目录不存在，请检查路径是否正确",
+                std::io::ErrorKind::NotFound => {
+                    if let Some(cwd) = current_dir {
+                        if cwd.contains("test_output") || cwd.contains("batch_output") {
+                            "您当前在生成的项目目录中，请使用 'cd /Users/pingzi/Developer/work/solana/solores' 回到项目根目录"
+                        } else {
+                            "文件或目录不存在，请检查路径是否正确"
+                        }
+                    } else {
+                        "文件或目录不存在，请检查路径是否正确"
+                    }
+                },
                 std::io::ErrorKind::PermissionDenied => "权限被拒绝，请检查文件权限设置",
                 std::io::ErrorKind::AlreadyExists => "文件已存在，请选择不同的路径或删除现有文件",
                 _ => "请检查文件系统状态和权限",
