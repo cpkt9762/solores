@@ -245,6 +245,100 @@ Override the program ID in the IDL:
 solores idl.json -p "YourProgram1111111111111111111111111111111"
 ```
 
+### 🔧 Interface Repair Tools
+
+**Raydium Interface Repair** (`scripts/fix_raydium_interface.py`)
+
+Specialized tool for repairing generated Raydium interfaces to support dynamic 17/18 account scenarios:
+
+```bash
+# Repair generated Raydium interface
+./scripts/fix_raydium_interface.py --interface-dir path/to/sol_raydium_interface
+
+# Example: Fix newly generated interface  
+./scripts/fix_raydium_interface.py --interface-dir test_output/raydium_test/sol_raydium_interface
+```
+
+**Key Features:**
+- **Dynamic Account Handling**: Supports both 17 and 18 account scenarios for SwapBaseIn/Out instructions
+- **Option<Pubkey> Conversion**: Converts amm_target_orders to optional field
+- **Dynamic AccountMeta Generation**: Transforms fixed arrays to dynamic Vec generation
+- **Complete Validation**: File checks, repair validation, and compilation testing
+- **UV Script Format**: Auto-manages dependencies, no manual installation required
+- **Backup & Recovery**: Automatic file backup with error recovery
+- **Colored Logging**: Detailed progress display and status reporting
+
+**Repair Results:**
+```rust
+// Field type repair - amm_target_orders becomes Optional
+pub struct SwapBaseInKeys {
+    pub amm_target_orders: Option<Pubkey>,  // ✅ Supports 17/18 accounts
+    // ...
+}
+
+// Dynamic From trait implementation
+impl From<&[Pubkey]> for SwapBaseInKeys {
+    fn from(pubkeys: &[Pubkey]) -> Self {
+        let has_target_orders = pubkeys.len() >= 18;  // Dynamic detection
+        if has_target_orders {
+            amm_target_orders: Some(pubkeys[4]),      // 18-account scenario
+        } else {
+            amm_target_orders: None,                  // 17-account scenario
+        }
+    }
+}
+```
+
+### 📊 Code Validation Tools
+
+**Function Consistency Validator** (`scripts/validate_module_functions.py`)
+
+Professional tool for comprehensive validation of generated code function interface consistency:
+
+```bash
+# Single project validation
+./scripts/validate_module_functions.py --project path/to/generated/project
+
+# Batch validation
+./scripts/validate_module_functions.py --batch-dir path/to/batch/output
+```
+
+**Validation Coverage:**
+- **Cross-Module Consistency**: Verifies Instructions, Accounts, Events, Parsers modules
+- **Function Interface Checks**: Validates required functions exist with correct signatures
+- **IxData Structures**: Checks try_to_vec, from_bytes, default functions
+- **Keys Structures**: Verifies From trait implementations
+- **Parser Modules**: Validates parser functions and enums
+- **Batch Support**: Single project and batch directory validation
+- **Detailed Reports**: Colored output with comprehensive statistics
+
+### 🚀 Smart Build System
+
+**UV Build Wrapper** (`scripts/solores-wrapper.py`)
+
+Intelligent build detection and automation tool ensuring you always use the latest binary:
+
+**Key Features:**
+- **Auto-Build Detection**: Checks source file modification times, rebuilds automatically when needed
+- **Precise Time Comparison**: Python pathlib accurate file timestamp comparison
+- **Colored Progress Display**: Clear build status, timing, and file information
+- **Robust Error Handling**: Safe stop on build failures, prevents using outdated versions
+
+**Setup:**
+```json
+{
+  "env": {
+    "SOLORES_BIN": "/path/to/solores/scripts/solores-wrapper.py"
+  }
+}
+```
+
+**Automated Workflow:**
+1. Check if solores source files are newer than binary
+2. Automatically run `cargo build --release` if needed
+3. Display build progress and binary file information  
+4. Execute the latest solores binary
+
 ## 🎯 Type Mapping Intelligence
 
 Solores intelligently handles complex type mappings:
@@ -266,6 +360,9 @@ Solores intelligently handles complex type mappings:
 | 100% Compilation Rate | ✅ | ❌ | N/A |
 | SmallVec Support | ✅ | ❌ | ❌ |
 | Multi-file Organization | ✅ | ❌ | ✅ |
+| Interface Repair Tools | ✅ | ❌ | ❌ |
+| Code Validation Tools | ✅ | ❌ | ❌ |
+| Smart Build System | ✅ | ❌ | ❌ |
 | Rust Native | ✅ | ✅ | ❌ (TypeScript) |
 | Proven at Scale (16+ protocols) | ✅ | ❌ | N/A |
 
@@ -304,6 +401,24 @@ Each generated module is fully documented with:
 - Type safety guarantees
 - Discriminator constants
 - Account length constants
+
+## 🛠️ Developer Tools Ecosystem
+
+The Solores project includes a comprehensive set of developer tools in the `/scripts` directory:
+
+### 🔧 Interface Repair Tools
+- **`fix_raydium_interface.py`**: Python-based Raydium interface repair tool with UV dependency management
+- Modern replacement for shell-based repair scripts with enhanced error handling and progress reporting
+
+### 📊 Code Quality Tools
+- **`validate_module_functions.py`**: Professional validation tool for generated code consistency
+- Comprehensive function interface verification across all modules
+
+### ⚡ Development Automation
+- **`solores-wrapper.py`**: Intelligent build wrapper with automatic source change detection
+- Ensures you're always using the latest binary with colored progress output
+
+These tools demonstrate Solores' commitment to providing a complete development experience beyond just code generation.
 
 ## 🤝 Contributing
 

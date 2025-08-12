@@ -387,7 +387,7 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
         });
 
         quote! {
-            use solana_instruction::{AccountMeta, Instruction};
+            // 使用绝对路径，不需要导入
             use solana_cpi::invoke;
             use solana_program_entrypoint::ProgramResult;
             use solana_pubkey::Pubkey;
@@ -651,20 +651,20 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             
             
             // Client functions
-            pub fn #ix_fn_name(#fn_params) -> Result<Instruction, std::io::Error> {
+            pub fn #ix_fn_name(#fn_params) -> Result<solana_instruction::Instruction, std::io::Error> {
                 #fn_body
                 let data = #data_expr;
-                Ok(Instruction {
+                Ok(solana_instruction::Instruction {
                     program_id: crate::ID,
                     accounts: #accounts_expr,
                     data,
                 })
             }
 
-            pub fn #ix_with_program_id_fn_name(program_id: Pubkey, #fn_params) -> Result<Instruction, std::io::Error> {
+            pub fn #ix_with_program_id_fn_name(program_id: Pubkey, #fn_params) -> Result<solana_instruction::Instruction, std::io::Error> {
                 #fn_body
                 let data = #data_expr;
-                Ok(Instruction {
+                Ok(solana_instruction::Instruction {
                     program_id,
                     accounts: #accounts_expr,
                     data,
