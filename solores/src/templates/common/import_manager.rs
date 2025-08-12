@@ -113,13 +113,13 @@ impl ImportManager {
         let (key, import_statement) = match &import_type {
             ImportType::Borsh => (
                 "borsh".to_string(),
-                "use borsh::{BorshDeserialize, BorshSerialize};".to_string(),
+                "".to_string(), // 移除 Borsh 导入，改用完整路径
             ),
             ImportType::Solana(solana_import) => {
                 match solana_import {
                     SolanaImport::Pubkey => (
                         "solana_pubkey".to_string(),
-                        "use solana_pubkey::Pubkey;".to_string(),
+                        "#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string(),
                     ),
                     SolanaImport::AccountInfo => (
                         "account_info".to_string(),
@@ -135,7 +135,7 @@ impl ImportManager {
                     ),
                     SolanaImport::ProgramError => (
                         "program_error".to_string(),
-                        "use solana_program_error::ProgramError;".to_string(),
+                        "".to_string(), // 移除 ProgramError 导入，改用完整路径
                     ),
                     SolanaImport::Invoke => (
                         "invoke".to_string(),
@@ -157,7 +157,7 @@ impl ImportManager {
             ),
             ImportType::Test => (
                 "test_imports".to_string(),
-                "#[cfg(test)]\nuse crate::*;".to_string(),
+                "#[cfg(test)]\n#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string(),
             ),
         };
 
@@ -252,16 +252,14 @@ impl ImportManager {
         self.mark_as_used("invoke");
     }
 
-    /// 添加标准库IO导入
+    /// 废弃：标准库IO导入已改用完整路径
     pub fn add_std_io(&mut self) {
-        self.add_import(ImportType::Std("io".to_string()));
-        self.mark_as_used("std_io");
+        // 不再添加导入，代码中使用完整路径 std::io::
     }
 
-    /// 添加标准库IO Read导入
+    /// 废弃：标准库IO Read导入已改用完整路径
     pub fn add_std_io_read(&mut self) {
-        self.add_import(ImportType::Std("io::Read".to_string()));
-        self.mark_as_used("std_io_read");
+        // 不再添加导入，代码中使用完整路径 std::io::Read
     }
 
     /// 添加内部crate类型导入
@@ -422,22 +420,12 @@ impl ImportManager {
     pub fn generate_minimal_imports(&self) -> TokenStream {
         let mut imports = Vec::new();
         
-        // Borsh导入
-        if self.actually_used_symbols.contains("BorshDeserialize") || 
-           self.actually_used_symbols.contains("BorshSerialize") {
-            let mut borsh_imports = Vec::new();
-            if self.actually_used_symbols.contains("BorshDeserialize") {
-                borsh_imports.push("BorshDeserialize");
-            }
-            if self.actually_used_symbols.contains("BorshSerialize") {
-                borsh_imports.push("BorshSerialize");
-            }
-            imports.push(format!("use borsh::{{{}}};", borsh_imports.join(", ")));
-        }
+        // 移除 Borsh导入，改用完整路径
+        // Borsh 现在使用完整路径：borsh::BorshDeserialize, borsh::BorshSerialize
         
         // Solana导入
         if self.actually_used_symbols.contains("Pubkey") {
-            imports.push("use solana_pubkey::Pubkey;".to_string());
+            imports.push("#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string());
         }
         
         if self.actually_used_symbols.contains("AccountInfo") {
@@ -460,9 +448,7 @@ impl ImportManager {
             imports.push("use solana_program_entrypoint::ProgramResult;".to_string());
         }
         
-        if self.actually_used_symbols.contains("ProgramError") {
-            imports.push("use solana_program_error::ProgramError;".to_string());
-        }
+        // 移除 ProgramError 导入，代码中使用 solana_program_error::ProgramError 完整路径
         
         if self.actually_used_symbols.contains("invoke") || 
            self.actually_used_symbols.contains("invoke_signed") {
@@ -476,14 +462,8 @@ impl ImportManager {
             imports.push(format!("use solana_cpi::{{{}}};", invoke_imports.join(", ")));
         }
         
-        // 标准库导入
-        if self.actually_used_symbols.contains("std::io::Read") {
-            imports.push("use std::io::Read;".to_string());
-        }
-        
-        if self.actually_used_symbols.contains("std::io::Error") {
-            imports.push("use std::io::Error;".to_string());
-        }
+        // 移除标准库导入，代码中使用完整路径
+        // std::io::Read, std::io::Error 等都使用完整路径
         
         // 排序并生成TokenStream
         imports.sort();
@@ -515,50 +495,30 @@ impl ImportManager {
     }
 
     /// 生成针对指令文件的智能优化导入（基于代码内容分析和types模块存在性检查）
+    /// 使用完整路径策略：只导入基础类型（borsh, Pubkey），其他类型使用完整路径
     pub fn generate_optimized_instruction_imports_for_code_with_types_check(
         code_content: &str, 
         has_types_module: bool
     ) -> TokenStream {
-        let mut manager = Self::new();
+        log::debug!("🔧 生成完整路径优化导入，代码长度: {}", code_content.len());
         
-        // 分析代码内容并确定实际需要的导入
-        manager.analyze_code_usage(code_content);
-        
-        // 检查特定的instruction文件模式
-        let needs_types = has_types_module && (
-            code_content.contains("impl From<") || 
-            code_content.contains("impl Default for") ||
-            code_content.contains("crate::types::") ||
-            // 检查常见自定义类型名（以大写字母开头的驼峰命名）
-            has_custom_types_in_code(code_content)
-        );
-        
-        // 强制添加指令文件通常需要的导入
-        manager.mark_as_used("borsh"); // 指令总是需要Borsh
-        
-        // 根据实际使用情况添加其他导入
         let mut imports = Vec::new();
         
-        // Borsh导入（指令文件必需）
-        imports.push("use borsh::{BorshDeserialize, BorshSerialize};".to_string());
+        // 移除 Borsh导入，改用完整路径
+        // Borsh 现在使用完整路径：borsh::BorshDeserialize, borsh::BorshSerialize
         
-        // Pubkey导入（如果需要）
-        if manager.actually_used_symbols.contains("Pubkey") || code_content.contains("Pubkey") {
-            imports.push("use solana_pubkey::Pubkey;".to_string());
+        // Pubkey导入（保留短路径 - 按用户要求）
+        if code_content.contains("Pubkey") {
+            imports.push("#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string());
+            log::debug!("✅ 添加Pubkey短路径导入");
         }
         
-        // AccountMeta和Instruction导入（如果需要）
-        if manager.actually_used_symbols.contains("AccountMeta") || 
-           manager.actually_used_symbols.contains("Instruction") || 
-           code_content.contains("AccountMeta") || 
-           code_content.contains("Instruction") {
-            imports.push("use solana_instruction::{AccountMeta, Instruction};".to_string());
-        }
+        // 移除AccountMeta和Instruction的导入，改用完整路径
+        // 不再添加 solana_instruction 导入，代码中直接使用 solana_instruction::AccountMeta 等
+        log::debug!("🚫 跳过solana_instruction导入 - 使用完整路径");
         
-        // Types导入（只有在types模块存在且需要时才添加）
-        if needs_types {
-            imports.push("use crate::types::*;".to_string());
-        }
+        // 不再自动添加types通配符导入，代码中已使用完整路径 crate::types::
+        log::debug!("🚫 跳过types通配符导入 - 使用完整路径 crate::types::");
         
         // 转换为TokenStream
         let import_tokens: Result<Vec<TokenStream>, _> = imports
@@ -567,11 +527,14 @@ impl ImportManager {
             .collect();
         
         match import_tokens {
-            Ok(tokens) => quote! { #(#tokens)* },
-            Err(_) => {
-                // 回退到基础导入
+            Ok(tokens) => {
+                log::debug!("✅ 生成完整路径导入成功，导入数量: {}", imports.len());
+                quote! { #(#tokens)* }
+            },
+            Err(e) => {
+                log::warn!("⚠️ 导入解析失败，回退到基础导入: {:?}", e);
                 quote! {
-                    use borsh::{BorshDeserialize, BorshSerialize};
+                    // 移除 Borsh 导入，改用完整路径
                 }
             }
         }
@@ -580,7 +543,6 @@ impl ImportManager {
     /// 生成针对指令文件的优化导入（包含指令文件必需的所有类型）
     pub fn generate_optimized_instruction_imports() -> TokenStream {
         quote! {
-            use borsh::{BorshDeserialize, BorshSerialize};
             use solana_pubkey::Pubkey;
             use solana_instruction::{AccountMeta, Instruction};
             use crate::types::*;
@@ -596,18 +558,16 @@ impl ImportManager {
     pub fn generate_smart_account_imports(code_content: &str) -> TokenStream {
         let mut imports = Vec::new();
         
-        // Borsh导入（账户结构体总是需要）
-        imports.push("use borsh::{BorshDeserialize, BorshSerialize};".to_string());
+        // 移除 Borsh导入，改用完整路径
+        // Borsh 现在使用完整路径：borsh::BorshDeserialize, borsh::BorshSerialize
         
         // Pubkey导入（如果代码中使用了Pubkey）
         if code_content.contains("Pubkey") {
-            imports.push("use solana_pubkey::Pubkey;".to_string());
+            imports.push("#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string());
         }
         
         // Types导入（如果引用了其他类型）
-        if code_content.contains("crate::types::") && !code_content.contains("use crate::types::*;") {
-            imports.push("use crate::types::*;".to_string());
-        }
+        // 不再自动添加types通配符导入，代码中已使用完整路径
         
         // 转换为TokenStream
         let import_tokens: Result<Vec<TokenStream>, _> = imports
@@ -617,7 +577,7 @@ impl ImportManager {
         
         match import_tokens {
             Ok(tokens) => quote! { #(#tokens)* },
-            Err(_) => quote! { use borsh::{BorshDeserialize, BorshSerialize}; },
+            Err(_) => quote! {},
         }
     }
 
@@ -625,21 +585,19 @@ impl ImportManager {
     pub fn generate_smart_type_imports(code_content: &str) -> TokenStream {
         let mut imports = Vec::new();
         
-        // Borsh导入（类型结构体总是需要）
-        imports.push("use borsh::{BorshDeserialize, BorshSerialize};".to_string());
+        // 移除 Borsh导入，改用完整路径
+        // Borsh 现在使用完整路径：borsh::BorshDeserialize, borsh::BorshSerialize
         
         // Pubkey导入（如果代码中使用了Pubkey）
         if code_content.contains("Pubkey") {
-            imports.push("use solana_pubkey::Pubkey;".to_string());
+            imports.push("#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string());
         }
         
         // 避免自引用types模块
         if code_content.contains("crate::types::") && !code_content.contains("use crate::types::*;") {
             // Types模块通常不需要自引用除非有嵌套类型
             let has_nested_types = code_content.matches("crate::types::").count() > 1;
-            if has_nested_types {
-                imports.push("use crate::types::*;".to_string());
-            }
+            // 不再自动添加types通配符导入，使用完整路径
         }
         
         // 转换为TokenStream
@@ -650,7 +608,7 @@ impl ImportManager {
         
         match import_tokens {
             Ok(tokens) => quote! { #(#tokens)* },
-            Err(_) => quote! { use borsh::{BorshDeserialize, BorshSerialize}; },
+            Err(_) => quote! {},
         }
     }
 
@@ -690,10 +648,7 @@ impl ImportManager {
             imports.push("use solana_program_error::ProgramError;".to_string());
         }
         
-        // thiserror::Error导入（如果代码中使用了）
-        if code_content.contains("#[derive(Error)]") || code_content.contains("thiserror::Error") {
-            imports.push("use thiserror::Error;".to_string());
-        }
+        // 移除 thiserror::Error 导入，代码中使用 thiserror::Error 完整路径
         
         // 转换为TokenStream
         let import_tokens: Result<Vec<TokenStream>, _> = imports
@@ -711,31 +666,15 @@ impl ImportManager {
     pub fn generate_smart_parser_imports(code_content: &str) -> TokenStream {
         let mut imports = Vec::new();
         
-        // BorshDeserialize导入（Parser模块通常需要）
-        if code_content.contains("BorshDeserialize") || code_content.contains("try_from_slice") {
-            imports.push("use borsh::BorshDeserialize;".to_string());
-        }
-        
-        // BorshSerialize导入（如果需要序列化）
-        if code_content.contains("BorshSerialize") || code_content.contains("try_to_vec") {
-            imports.push("use borsh::BorshSerialize;".to_string());
-        }
-        
-        // 如果两者都需要，使用组合导入
-        if code_content.contains("BorshDeserialize") && code_content.contains("BorshSerialize") {
-            imports.clear();
-            imports.push("use borsh::{BorshDeserialize, BorshSerialize};".to_string());
-        }
+        // 移除 Borsh导入，改用完整路径
+        // Borsh 现在使用完整路径：borsh::BorshDeserialize, borsh::BorshSerialize
         
         // Pubkey导入（如果需要）
         if code_content.contains("Pubkey") {
-            imports.push("use solana_pubkey::Pubkey;".to_string());
+            imports.push("#[allow(unused_imports)]\nuse solana_pubkey::Pubkey;".to_string());
         }
         
-        // std::io相关导入
-        if code_content.contains("std::io::Write") || code_content.contains(".write(") {
-            imports.push("use std::io::Write;".to_string());
-        }
+        // 移除 std::io::Write 导入，代码中使用 std::io::Write 完整路径
         
         // 转换为TokenStream
         let import_tokens: Result<Vec<TokenStream>, _> = imports
@@ -745,15 +684,14 @@ impl ImportManager {
         
         match import_tokens {
             Ok(tokens) => quote! { #(#tokens)* },
-            Err(_) => quote! { use borsh::BorshDeserialize; },
+            Err(_) => quote! {},
         }
     }
 
     /// 生成错误模块导入
     pub fn generate_error_imports() -> TokenStream {
         quote! {
-            use solana_program_error::ProgramError;
-            use thiserror::Error;
+            // 移除导入，错误模块代码中使用完整路径
         }
     }
 
@@ -762,7 +700,7 @@ impl ImportManager {
         let mut manager = Self::new();
         manager.add_borsh_imports();
         manager.add_solana_pubkey();
-        manager.add_std_io();
+        // 移除 std::io 导入，代码中使用完整路径
         
         manager.generate_imports()
     }
@@ -771,8 +709,8 @@ impl ImportManager {
     pub fn generate_test_imports() -> TokenStream {
         quote! {
             #[cfg(test)]
-            #[allow(unused_imports)]
-            use crate::*;
+            #[allow(unused_imports)] 
+            use solana_pubkey::Pubkey;
         }
     }
 

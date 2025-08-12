@@ -34,7 +34,6 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
         // Reuse the instructions template logic with proper imports
         let instructions_template = AnchorInstructionsTemplate::new(self.idl, self.args);
         let imports = ImportManager::generate_parser_imports();
-        let constants = instructions_template.generate_discriminator_constants();
         let enum_def = instructions_template.generate_instruction_enum();
         let parse_function = instructions_template.generate_parse_function();
         
@@ -56,9 +55,9 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             }
         };
 
-        // Generate tests using the test template
+        // Generate tests using the test template (only if --test flag is enabled)
         let instructions = self.idl.instructions.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        let tests = if !instructions.is_empty() {
+        let tests = if !instructions.is_empty() && self.args.test {
             let test_generator = AnchorInstructionsParserTestTemplate::new();
             let test_content = test_generator.generate_instructions_consistency_tests(instructions, self.idl.program_name());
             
@@ -78,10 +77,8 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             
             #imports
             
-            // Additional import needed for parser context
+            // Import discriminator constants and other items from instructions module
             use crate::instructions::*;
-            
-            #constants
             
             #enum_def
             
@@ -144,8 +141,8 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             }
         });
 
-        // Generate tests using the test template
-        let tests = if !accounts.is_empty() {
+        // Generate tests using the test template (only if --test flag is enabled)
+        let tests = if !accounts.is_empty() && self.args.test {
             let test_generator = AnchorAccountsParserTestTemplate::new();
             let test_content = test_generator.generate_accounts_consistency_tests(accounts, &self.idl.program_name());
             
@@ -153,7 +150,6 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
                 #[cfg(test)]
                 mod tests {
                     use super::*;
-                    use borsh::{BorshDeserialize, BorshSerialize};
                     #test_content
                 }
             }
@@ -168,7 +164,7 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             
             #imports
             use crate::accounts::*;
-            use std::io::Error;
+            // 移除导入，使用完整路径 std::io::Error
             
             /// Program account types
             #[derive(Clone, Debug, PartialEq)]
@@ -177,10 +173,10 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             }
             
             /// Try to parse account data into one of the known account types
-            pub fn try_unpack_account(data: &[u8]) -> Result<#program_name, Error> {
+            pub fn try_unpack_account(data: &[u8]) -> Result<#program_name, std::io::Error> {
                 #(#match_arms)*
                 
-                Err(Error::new(
+                Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "Unable to parse account data into any known account type"
                 ))

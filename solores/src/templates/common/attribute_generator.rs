@@ -11,10 +11,10 @@ pub struct AttributeGenerator;
 impl AttributeGenerator {
     /// 生成标准的 derive 属性
     ///
-    /// 包含 Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq
+    /// 包含 Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq
     pub fn generate_standard_derives() -> TokenStream {
         quote! {
-            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq)]
+            #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq)]
         }
     }
     
@@ -23,7 +23,7 @@ impl AttributeGenerator {
     /// 用于没有浮点数字段的结构体
     pub fn generate_standard_derives_with_eq() -> TokenStream {
         quote! {
-            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+            #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
         }
     }
     
@@ -32,7 +32,7 @@ impl AttributeGenerator {
     /// 包含 Pod, Zeroable 用于零拷贝优化
     pub fn generate_zerocopy_derives() -> TokenStream {
         quote! {
-            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Pod, Zeroable)]
+            #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Pod, Zeroable)]
         }
     }
     

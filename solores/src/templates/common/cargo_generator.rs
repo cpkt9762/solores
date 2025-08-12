@@ -8,7 +8,7 @@ use serde::Serialize;
 use toml::{map::Map, Value};
 
 use crate::{Args, templates::{ContractMode, TemplateGenerator}, utils::open_file_create_overwrite, idl_format::IdlFormat};
-use std::io::Write;
+// 移除导入，使用完整路径 std::io::Write
 
 /// Cargo.toml生成器
 pub struct CargoTomlGenerator<'a> {
@@ -59,8 +59,8 @@ impl<'a> CargoTomlGenerator<'a> {
         let cargo_toml_content = self.generate_cargo_toml();
         let path = self.args.output_dir.join("Cargo.toml");
         let mut file = open_file_create_overwrite(path)?;
-        file.write_all(cargo_toml_content.as_bytes())?;
-        file.flush()
+        std::io::Write::write_all(&mut file, cargo_toml_content.as_bytes())?;
+        std::io::Write::flush(&mut file)
     }
 
     /// 获取细分化的依赖映射
@@ -73,10 +73,12 @@ impl<'a> CargoTomlGenerator<'a> {
         // 完全细分化的Solana依赖 - 无需solana-program
         deps.insert("solana-pubkey".to_string(), self.create_features_dependency_value("2.4.0", vec!["borsh", "curve25519"]));
         deps.insert("solana-program-error".to_string(), self.create_dependency_value("2.2.2"));
-        deps.insert("solana-account-info".to_string(), self.create_dependency_value("2.3.0"));
         deps.insert("solana-instruction".to_string(), self.create_dependency_value("2.3.0"));
-        deps.insert("solana-program-entrypoint".to_string(), self.create_dependency_value("2.3.0"));
-        deps.insert("solana-cpi".to_string(), self.create_dependency_value("2.2.1"));
+        
+        // 可选的扩展功能依赖
+        deps.insert("solana-account-info".to_string(), self.create_optional_dependency_value("2.3.0"));
+        deps.insert("solana-program-entrypoint".to_string(), self.create_optional_dependency_value("2.3.0"));
+        deps.insert("solana-cpi".to_string(), self.create_optional_dependency_value("2.2.1"));
 
         // 可选的serde依赖
         deps.insert("serde".to_string(), self.create_optional_dependency_value(&self.args.serde_vers));
@@ -135,6 +137,26 @@ impl<'a> CargoTomlGenerator<'a> {
             Value::String("dep:serde_with".to_string()),
         ];
         features.insert("serde".to_string(), Value::Array(serde_deps));
+
+        // 可选的扩展功能 features
+        features.insert("account-info".to_string(), Value::Array(vec![
+            Value::String("dep:solana-account-info".to_string()),
+        ]));
+        
+        features.insert("program-entrypoint".to_string(), Value::Array(vec![
+            Value::String("dep:solana-program-entrypoint".to_string()),
+        ]));
+        
+        features.insert("cpi".to_string(), Value::Array(vec![
+            Value::String("dep:solana-cpi".to_string()),
+        ]));
+        
+        // 便利 feature 包含所有扩展功能
+        features.insert("full-solana".to_string(), Value::Array(vec![
+            Value::String("account-info".to_string()),
+            Value::String("program-entrypoint".to_string()),
+            Value::String("cpi".to_string()),
+        ]));
 
         features
     }

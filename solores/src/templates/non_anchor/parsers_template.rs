@@ -37,19 +37,6 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
             return quote! {};
         }
 
-        // Generate discriminator constants for 1-byte discriminators
-        let discriminator_constants = instructions.iter().enumerate().map(|(index, ix)| {
-            let const_name = syn::Ident::new(
-                &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
-                proc_macro2::Span::call_site(),
-            );
-            let discriminator_value = index as u8;
-            
-            quote! {
-                /// 1-byte instruction discriminator constant for non-Anchor contracts
-                pub const #const_name: u8 = #discriminator_value;
-            }
-        });
 
         // Generate instruction enum variants
         let enum_variants = instructions.iter().map(|ix| {
@@ -101,14 +88,14 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
                         ));
                     }
                     let keys = #keys_struct_name::from(&accounts[..#accounts_len_const]);
-                    let args = #args_struct_name::deserialize(&mut &data[..])?;
+                    let args = #args_struct_name::from_bytes(&data[..])?;
                     Ok(ProgramInstruction::#variant_name(keys, args))
                 },
             }
         });
 
-        // Generate tests using the test template
-        let tests = if !instructions.is_empty() {
+        // Generate tests using the test template (only if --test flag is enabled)
+        let tests = if !instructions.is_empty() && self.args.test {
             let test_generator = NonAnchorInstructionsParserTestTemplate::new();
             let test_content = test_generator.generate_instructions_consistency_tests(instructions, self.idl.program_name());
             
@@ -126,12 +113,10 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
         quote! {
             //! Instructions parser for non-Anchor contracts with 1-byte discriminators
             
+            // Import discriminator constants and other items from instructions module  
             use crate::instructions::*;
             use solana_pubkey::Pubkey;
-            use borsh::{BorshDeserialize, BorshSerialize};
-            use std::io::Write;
-            
-            #(#discriminator_constants)*
+            // 移除导入，使用完整路径 std::io::Write
             
             /// Program instruction types for non-Anchor contracts
             #[derive(Clone, Debug, PartialEq)]
@@ -190,14 +175,14 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
             
             quote! {
                 // Try to deserialize as this account type based on length
-                if let Ok(account) = #struct_name::try_from_slice(data) {
+                if let Ok(account) = #struct_name::from_bytes(data) {
                     return Ok(#program_name::#variant_name(account));
                 }
             }
         });
 
-        // Generate tests using the test template
-        let tests = if !accounts.is_empty() {
+        // Generate tests using the test template (only if --test flag is enabled)
+        let tests = if !accounts.is_empty() && self.args.test {
             let test_generator = NonAnchorAccountsParserTestTemplate::new();
             let test_content = test_generator.generate_accounts_consistency_tests(accounts, &self.idl.program_name());
             
@@ -205,8 +190,7 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
                 #[cfg(test)]
                 mod tests {
                     use super::*;
-                    use borsh::{BorshDeserialize, BorshSerialize};
-                    #test_content
+                            #test_content
                 }
             }
         } else {
@@ -217,8 +201,7 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
             //! Account parser for non-Anchor contracts using length-based identification
             
             use crate::accounts::*;
-            use borsh::{BorshDeserialize, BorshSerialize};
-            use std::io::Error;
+            // 移除导入，使用完整路径 std::io::Error
             
             /// Program account types for non-Anchor contracts
             #[derive(Clone, Debug, PartialEq)]
@@ -227,9 +210,9 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
             }
             
             /// Try to parse account data into one of the known account types using length-based identification
-            pub fn try_unpack_account(data: &[u8]) -> Result<#program_name, Error> {
+            pub fn try_unpack_account(data: &[u8]) -> Result<#program_name, std::io::Error> {
                 if data.is_empty() {
-                    return Err(Error::new(
+                    return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "Empty account data"
                     ));
@@ -237,7 +220,7 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
                 
                 #(#match_arms)*
                 
-                Err(Error::new(
+                Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("Unable to parse account data into any known account type (data length: {})", data.len())
                 ))

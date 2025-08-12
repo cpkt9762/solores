@@ -7,11 +7,11 @@ use quote::quote;
 use convert_case::{Case, Casing};
 use heck::ToShoutySnakeCase;
 
-use crate::idl_format::non_anchor_idl::NonAnchorIdl;
-use crate::idl_format::non_anchor_idl::NonAnchorFieldType;
+use crate::idl_format::non_anchor_idl::{NonAnchorIdl, NonAnchorFieldType, NonAnchorAccount};
 use crate::Args;
 use crate::templates::TemplateGenerator;
 use crate::templates::common::{doc_generator::DocGenerator};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
 
 /// 非 Anchor Accounts 模板
 pub struct NonAnchorAccountsTemplate<'a> {
@@ -25,40 +25,21 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         Self { idl, args }
     }
 
-    /// 生成基于长度的账户识别
-    pub fn generate_length_based_unpack(&self) -> TokenStream {
-        let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if accounts.is_empty() {
-            return quote! {};
-        }
-
-        let length_checks = accounts.iter().map(|account| {
-            let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            let len_const = syn::Ident::new(
-                &format!("{}_LEN", account.name.to_shouty_snake_case()),
-                proc_macro2::Span::call_site(),
-            );
-
-            quote! {
-                if data.len() == #len_const {
-                    return Ok(ProgramAccount::#struct_name(
-                        borsh::from_slice(data)?
-                    ));
-                }
-            }
-        });
-
-        quote! {
-            pub fn try_unpack_account(data: &[u8]) -> Result<ProgramAccount, std::io::Error> {
-                #(#length_checks)*
-                
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Unknown account length: {}", data.len()),
-                ))
-            }
+    /// 检查 typedef 字段类型是否为 Pubkey
+    fn is_typedef_field_pubkey_type(field_type: &NonAnchorFieldType) -> bool {
+        match field_type {
+            NonAnchorFieldType::Basic(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            _ => false
         }
     }
+    
+    /// 检查字符串字段类型是否为 Pubkey
+    fn is_string_field_pubkey_type(type_str: &str) -> bool {
+        matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
+    }
+
 
     /// 生成账户结构体
     pub fn generate_account_structs(&self) -> TokenStream {
@@ -78,12 +59,22 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             let fields = if let Some(account_fields) = &account.fields {
                 // 优先级1：直接使用account.fields
                 let struct_fields = account_fields.iter().map(|field| {
-                    let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
                     
+                    // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                    let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&field.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -94,12 +85,22 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
                 // 优先级2：从字段分配获取字段
                 let struct_fields = allocated_fields.iter().map(|field_def| {
-                    let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                     let field_docs = DocGenerator::generate_doc_comments(&Some(field_def.docs.clone()));
                     
+                    // 检查字符串字段类型是否为 Pubkey
+                    let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -115,7 +116,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             if let Some((doc_comments, fields)) = fields {
                 Some(quote! {
                     #doc_comments
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                    #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #struct_name {
                         #fields
@@ -171,9 +172,29 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                 }
             },
             _ => {
-                // 其他情况视为自定义类型或者结构体
-                let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
-                quote! { #type_ident }
+                // 检查是否是基本类型
+                let is_primitive = matches!(type_str, 
+                    "bool" | "u8" | "u16" | "u32" | "u64" | "u128" | 
+                    "i8" | "i16" | "i32" | "i64" | "i128" | 
+                    "String" | "string" | "Pubkey" | "publicKey" | "pubkey"
+                );
+                
+                if is_primitive {
+                    // 基本类型直接使用
+                    let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
+                    quote! { #type_ident }
+                } else {
+                    // 自定义类型，使用完整路径
+                    let type_path = format!("crate::types::{}", type_str);
+                    match syn::parse_str::<syn::Path>(&type_path) {
+                        Ok(path) => quote! { #path },
+                        Err(_) => {
+                            // 解析失败，使用直接类型名
+                            let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
+                            quote! { #type_ident }
+                        }
+                    }
+                }
             },
         }
     }
@@ -209,8 +230,10 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                 quote! { [#inner_type_token; #size_literal] }
             },
             NonAnchorFieldType::Defined { defined } => {
-                let type_name = syn::Ident::new(defined, proc_macro2::Span::call_site());
-                quote! { #type_name }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", defined);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             NonAnchorFieldType::Complex { kind, params } => {
                 // 处理复合类型，如 Vec<T>, Option<T>, [T; N] 等 (Legacy支持)
@@ -256,93 +279,19 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         }
     }
 
-    /// 生成长度常量
+    /// 生成长度常量 (已废弃，现在在单个文件生成中处理)
     pub fn generate_len_constants(&self) -> TokenStream {
-        let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if accounts.is_empty() {
-            return quote! {};
-        }
-
-        let len_constants = accounts.iter().map(|account| {
-            let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            let len_const = syn::Ident::new(
-                &format!("{}_LEN", account.name.to_shouty_snake_case()),
-                proc_macro2::Span::call_site(),
-            );
-            
-            quote! {
-                pub const #len_const: usize = std::mem::size_of::<#struct_name>();
-                
-                impl #struct_name {
-                    pub const LEN: usize = std::mem::size_of::<Self>();
-                }
-            }
-        });
-
-        quote! {
-            #(#len_constants)*
-        }
+        quote! {}
     }
 
-    /// 生成 try_to_vec 方法
+    /// 生成 try_to_vec 方法 (已废弃，现在在单个文件生成中处理)
     pub fn generate_try_to_vec_method(&self) -> TokenStream {
-        let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if accounts.is_empty() {
-            return quote! {};
-        }
-
-        let try_to_vec_methods = accounts.iter().map(|account| {
-            let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            
-            quote! {
-                impl #struct_name {
-                    pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
-                        borsh::to_vec(self)
-                    }
-                }
-            }
-        });
-
-        quote! {
-            #(#try_to_vec_methods)*
-        }
+        quote! {}
     }
 
-    /// 生成 from_bytes 方法
+    /// 生成 from_bytes 方法 (已废弃，现在在单个文件生成中处理)
     pub fn generate_from_bytes_method(&self) -> TokenStream {
-        let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if accounts.is_empty() {
-            return quote! {};
-        }
-
-        let from_bytes_methods = accounts.iter().map(|account| {
-            let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            let len_const = syn::Ident::new(
-                &format!("{}_LEN", account.name.to_shouty_snake_case()),
-                proc_macro2::Span::call_site(),
-            );
-            
-            quote! {
-                impl #struct_name {
-                    pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-                        if data.len() != #len_const {
-                            return Err(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "Account data length mismatch. Expected: {}, got: {}",
-                                    #len_const, data.len()
-                                ),
-                            ));
-                        }
-                        borsh::from_slice(data)
-                    }
-                }
-            }
-        });
-
-        quote! {
-            #(#from_bytes_methods)*
-        }
+        quote! {}
     }
 
     /// 生成 Default 实现
@@ -362,7 +311,8 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             let field_defaults = if let Some(account_fields) = &account.fields {
                 // 优先级1：直接使用account.fields
                 let default_values = account_fields.iter().map(|field| {
-                    let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = Self::generate_field_default_from_typedef_field_type(&field.field_type);
                     quote! { #field_name: #default_value, }
                 });
@@ -370,7 +320,8 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
                 // 优先级2：从字段分配获取字段
                 let default_values = allocated_fields.iter().map(|field_def| {
-                    let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = Self::generate_field_default_from_field_definition_type(&field_def.field_type);
                     quote! { #field_name: #default_value, }
                 });
@@ -514,35 +465,11 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         }
     }
 
-    /// 生成账户枚举（用于统一解析）
-    pub fn generate_account_enum(&self) -> TokenStream {
-        let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
-        if accounts.is_empty() {
-            return quote! {};
-        }
-
-        let enum_variants = accounts.iter().map(|account| {
-            let variant_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            
-            quote! {
-                #variant_name(#struct_name),
-            }
-        });
-
-        quote! {
-            /// Unified account enum for all program accounts
-            #[derive(Clone, Debug, PartialEq)]
-            pub enum ProgramAccount {
-                #(#enum_variants)*
-            }
-        }
-    }
 
     /// 为单个account生成完整的文件内容（NonAnchor使用长度识别）
     pub fn generate_single_account_file(&self, account: &crate::idl_format::non_anchor_idl::NonAnchorAccount) -> TokenStream {
         let struct_name = syn::Ident::new(&account.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-        let len_const = syn::Ident::new(
+        let _len_const = syn::Ident::new(
             &format!("{}_LEN", account.name.to_shouty_snake_case()),
             proc_macro2::Span::call_site(),
         );
@@ -553,16 +480,29 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let doc_comments = DocGenerator::generate_doc_comments(&account.docs);
         let account_name_str = &account.name;
         
+        // 计算 PACKED_LEN
+        let packed_size = Self::calculate_account_packed_size(account);
+        
         // NonAnchor字段生成优先级：direct fields → field allocation → empty structures
         let struct_fields = if let Some(account_fields) = &account.fields {
             // 优先级1：直接使用account.fields
             let field_tokens = account_fields.iter().map(|field| {
-                let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
+                // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&field.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -570,12 +510,22 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
             // 优先级2：从字段分配获取字段
             let field_tokens = allocated_fields.iter().map(|field_def| {
-                let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                 let field_docs = DocGenerator::generate_doc_comments(&Some(field_def.docs.clone()));
                 
+                // 检查字符串字段类型是否为 Pubkey
+                let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -591,7 +541,8 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let default_fields = if let Some(account_fields) = &account.fields {
             // 优先级1：直接使用account.fields
             let default_values = account_fields.iter().map(|field| {
-                let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let default_value = Self::generate_field_default_from_typedef_field_type(&field.field_type);
                 quote! { #field_name: #default_value, }
             });
@@ -599,7 +550,8 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
             // 优先级2：从字段分配获取字段
             let default_values = allocated_fields.iter().map(|field_def| {
-                let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let default_value = Self::generate_field_default_from_field_definition_type(&field_def.field_type);
                 quote! { #field_name: #default_value, }
             });
@@ -611,20 +563,12 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let account_doc_comment = format!("Account: {} (NonAnchor)", account_name_str);
         
         // 检查IDL是否有types字段
-        let has_types_module = self.idl.types.as_ref().map_or(false, |types| !types.is_empty());
+        let _has_types_module = self.idl.types.as_ref().map_or(false, |types| !types.is_empty());
         
-        // 生成导入语句
-        let imports = if has_types_module {
-            quote! {
-                use crate::types::*;
-                use borsh::{BorshDeserialize, BorshSerialize};
-                use solana_pubkey::Pubkey;
-            }
-        } else {
-            quote! {
-                use borsh::{BorshDeserialize, BorshSerialize};
-                use solana_pubkey::Pubkey;
-            }
+        // 生成导入语句 - 不使用通配符导入，类型引用使用完整路径
+        let imports = quote! {
+            #[allow(unused_imports)]
+            use solana_pubkey::Pubkey;
         };
         
         quote! {
@@ -633,12 +577,9 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             
             #imports
             
-            // Constants
-            pub const #len_const: usize = std::mem::size_of::<#struct_name>();
-            
             // Account Structure
             #doc_comments
-            #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+            #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct #struct_name {
                 #actual_struct_fields
@@ -653,26 +594,26 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             }
 
             impl #struct_name {
-                pub const LEN: usize = std::mem::size_of::<Self>();
+                pub const MEM_LEN: usize = std::mem::size_of::<Self>();
+                pub const PACKED_LEN: usize = #packed_size;
                 
                 pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
                     borsh::to_vec(self)
                 }
                 
                 pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-                    if data.len() != #len_const {
+                    if data.len() != Self::PACKED_LEN {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             format!(
                                 "Account data length mismatch. Expected: {}, got: {}",
-                                #len_const, data.len()
+                                Self::PACKED_LEN, data.len()
                             ),
                         ));
                     }
                     
-                    borsh::from_slice(data).map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-                    })
+                    borsh::BorshDeserialize::deserialize(&mut &data[..])
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
                 }
             }
         }
@@ -727,27 +668,65 @@ impl<'a> TemplateGenerator for NonAnchorAccountsTemplate<'a> {
             }
         });
         
-        // 生成统一的账户枚举和解析函数
-        let account_enum = self.generate_account_enum();
-        let length_based_unpack = self.generate_length_based_unpack();
-        
         quote! {
             //! Non-Anchor accounts module
             //! Generated account definitions with length-based identification
             //! Each account is defined in its own file
             
-            use borsh::{BorshDeserialize, BorshSerialize};
-            
             #(#module_declarations)*
             
             // Re-export all account items
             #(#re_exports)*
-            
-            // Unified account types
-            #account_enum
-            
-            // Unified account parser
-            #length_based_unpack
+        }
+    }
+}
+
+impl<'a> NonAnchorAccountsTemplate<'a> {
+    /// 计算账户的 PACKED_LEN 大小
+    fn calculate_account_packed_size(account: &NonAnchorAccount) -> usize {
+        let mut size = 0; // NonAnchor 没有 discriminator
+        
+        // 添加字段大小
+        if let Some(fields) = &account.fields {
+            for field in fields {
+                size += Self::calculate_field_size(&field.field_type);
+            }
+        }
+        
+        size
+    }
+    
+    /// 计算单个字段的序列化大小
+    fn calculate_field_size(field_type: &NonAnchorFieldType) -> usize {
+        match field_type {
+            NonAnchorFieldType::Basic(type_name) => {
+                match type_name.as_str() {
+                    "bool" => 1,
+                    "u8" | "i8" => 1,
+                    "u16" | "i16" => 2,
+                    "u32" | "i32" => 4,
+                    "u64" | "i64" => 8,
+                    "u128" | "i128" => 16,
+                    "f32" => 4,
+                    "f64" => 8,
+                    "publicKey" | "pubkey" | "Pubkey" => 32,
+                    "string" => 4 + 0, // Vec<u8> prefix (4 bytes) + variable content (估算为0)
+                    _ => 8, // 默认大小
+                }
+            },
+            NonAnchorFieldType::Array { array: (inner_type, size) } => {
+                Self::calculate_field_size(inner_type) * size
+            },
+            NonAnchorFieldType::Option { option: _inner_type } => {
+                1 + 0 // Option flag (1 byte) + inner type size (估算为0)
+            },
+            NonAnchorFieldType::Vec { vec: _inner_type } => {
+                4 + 0 // Vec length prefix (4 bytes) + variable content (估算为0)
+            },
+            NonAnchorFieldType::Defined { .. } => {
+                8 // 自定义类型默认估算
+            },
+            _ => 8, // 其他类型默认
         }
     }
 }

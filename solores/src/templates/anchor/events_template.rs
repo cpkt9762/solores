@@ -12,6 +12,7 @@ use crate::idl_format::anchor_idl::Event;
 use crate::idl_format::anchor_idl::AnchorType;
 use crate::templates::{TemplateGenerator, EventsTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
 
 /// Anchor Events 模板
 pub struct AnchorEventsTemplate<'a> {
@@ -45,19 +46,29 @@ impl<'a> AnchorEventsTemplate<'a> {
                 log::debug!("🎭 Events: Event '{}' 有直接字段定义，使用直接字段", event.name);
                 let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                 let struct_fields = event_fields.iter().map(|field| {
-                    let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
                     
+                    // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
 
                 Some(quote! {
                     #doc_comments
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                    #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #struct_name {
                         #(#struct_fields)*
@@ -73,7 +84,8 @@ impl<'a> AnchorEventsTemplate<'a> {
                         allocated_fields.iter().map(|f| &f.name).collect::<Vec<_>>());
                     let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                     let struct_fields = allocated_fields.iter().map(|field_def| {
-                        let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                        let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                        let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                         // 使用改进的类型转换逻辑
                         let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                         let field_docs = if field_def.docs.is_empty() { 
@@ -82,15 +94,24 @@ impl<'a> AnchorEventsTemplate<'a> {
                             DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                         };
                         
+                        // 检查字符串类型是否为 Pubkey
+                        let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                            generate_pubkey_serde_attr()
+                        } else {
+                            quote! {}
+                        };
+                        
                         quote! {
                             #field_docs
+                            #serde_attr
+                            #pubkey_serde_attr
                             pub #field_name: #field_type,
                         }
                     });
 
                     Some(quote! {
                         #doc_comments
-                        #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                        #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
                         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                         pub struct #struct_name {
                             #(#struct_fields)*
@@ -169,8 +190,28 @@ impl<'a> AnchorEventsTemplate<'a> {
             
             // 其他自定义类型
             _ => {
-                let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
-                quote! { #type_ident }
+                // 检查是否是基本类型（这些不应该在上面匹配的情况下到这里，但为了安全起见）
+                let is_primitive = matches!(type_str, 
+                    "bool" | "u8" | "u16" | "u32" | "u64" | "u128" | 
+                    "i8" | "i16" | "i32" | "i64" | "i128" | 
+                    "String" | "string" | "Pubkey" | "publicKey" | "pubkey"
+                );
+                
+                if is_primitive {
+                    let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
+                    quote! { #type_ident }
+                } else {
+                    // 自定义类型，使用完整路径
+                    let type_path = format!("crate::types::{}", type_str);
+                    match syn::parse_str::<syn::Path>(&type_path) {
+                        Ok(path) => quote! { #path },
+                        Err(_) => {
+                            // 如果解析失败，尝试直接使用
+                            let type_ident = syn::Ident::new(type_str, proc_macro2::Span::call_site());
+                            quote! { #type_ident }
+                        }
+                    }
+                }
             }
         }
     }
@@ -200,8 +241,10 @@ impl<'a> AnchorEventsTemplate<'a> {
                 }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => {
-                let type_name = syn::Ident::new(type_name, proc_macro2::Span::call_site());
-                quote! { #type_name }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", type_name);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, size) => {
                 let inner_type = Self::convert_idl_type_to_rust(inner_type);
@@ -264,7 +307,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                 #[derive(Clone, Debug, PartialEq)]
                 pub struct #wrapper_name(pub #struct_name);
                 
-                impl BorshSerialize for #wrapper_name {
+                impl borsh::BorshSerialize for #wrapper_name {
                     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
                         #discm_const_name.serialize(writer)?;
                         self.0.serialize(writer)
@@ -360,12 +403,22 @@ impl<'a> AnchorEventsTemplate<'a> {
         let event_fields = if let Some(fields) = &event.fields {
             // 路径1: 事件有直接字段定义
             let fields_tokens = fields.iter().map(|field| {
-                let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = self.convert_event_field_type(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
+                // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -376,7 +429,8 @@ impl<'a> AnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 路径2: 从字段分配获取字段
             let struct_fields = allocated_fields.iter().map(|field_def| {
-                let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 // 使用改进的类型转换逻辑
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                 let field_docs = if field_def.docs.is_empty() { 
@@ -385,8 +439,17 @@ impl<'a> AnchorEventsTemplate<'a> {
                     DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                 };
                 
+                // 检查字符串类型是否为 Pubkey
+                let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -404,7 +467,8 @@ impl<'a> AnchorEventsTemplate<'a> {
         let default_fields = if let Some(fields) = &event.fields {
             // 路径1: 事件有直接字段定义
             let default_values = fields.iter().map(|field| {
-                let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
             quote! { 
@@ -414,7 +478,8 @@ impl<'a> AnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 路径2: 从字段分配获取字段的默认值
             let default_values = allocated_fields.iter().map(|field_def| {
-                let field_name = syn::Ident::new(&field_def.name, proc_macro2::Span::call_site());
+                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
             quote! { 
@@ -432,16 +497,14 @@ impl<'a> AnchorEventsTemplate<'a> {
             #![doc = #event_doc_comment]
             #doc_comments
             
-            use borsh::{BorshDeserialize, BorshSerialize};
-            use solana_pubkey::Pubkey;
-            use crate::*;
+                        use solana_pubkey::Pubkey;
             
             // Constants
             pub const #const_name: [u8; 8] = #discriminator;
             
             // Event Structure - 统一结构，discriminator是第一个字段
             #doc_comments
-            #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+            #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct #event_name {
                 #event_fields
@@ -461,9 +524,8 @@ impl<'a> AnchorEventsTemplate<'a> {
                 }
                 
                 pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-                    borsh::from_slice(data).map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-                    })
+                    borsh::BorshDeserialize::deserialize(&mut &data[..])
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
                 }
             }
         }
@@ -519,6 +581,26 @@ impl<'a> AnchorEventsTemplate<'a> {
                 quote! { #type_ident }
             },
         }
+    }
+}
+
+impl<'a> AnchorEventsTemplate<'a> {
+    /// 检查 Anchor 字段类型是否为 Pubkey
+    fn is_anchor_field_pubkey_type(field_type: &crate::idl_format::anchor_idl::AnchorFieldType) -> bool {
+        match field_type {
+            crate::idl_format::anchor_idl::AnchorFieldType::Basic(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::PrimitiveOrPubkey(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            _ => false
+        }
+    }
+    
+    /// 检查字符串字段类型是否为 Pubkey
+    fn is_string_field_pubkey_type(type_str: &str) -> bool {
+        matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
     }
 }
 

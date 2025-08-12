@@ -10,6 +10,7 @@ use heck::ToShoutySnakeCase;
 use crate::idl_format::non_anchor_idl::NonAnchorIdl;
 use crate::templates::{TemplateGenerator, EventsTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
 
 /// 非 Anchor Events 模板
 pub struct NonAnchorEventsTemplate<'a> {
@@ -20,6 +21,21 @@ impl<'a> NonAnchorEventsTemplate<'a> {
     /// 创建新的非 Anchor Events 模板
     pub fn new(idl: &'a NonAnchorIdl) -> Self {
         Self { idl }
+    }
+
+    /// 检查字段类型是否为 Pubkey
+    fn is_field_pubkey_type(field_type: &crate::idl_format::non_anchor_idl::NonAnchorFieldType) -> bool {
+        match field_type {
+            crate::idl_format::non_anchor_idl::NonAnchorFieldType::Basic(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            _ => false
+        }
+    }
+    
+    /// 检查字符串字段类型是否为 Pubkey
+    fn is_string_field_pubkey_type(type_str: &str) -> bool {
+        matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
     }
 
     /// 生成事件结构体
@@ -40,12 +56,22 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             let struct_fields = if let Some(event_fields) = &event.fields {
                 // 优先级1：直接使用event.fields
                 let field_tokens = event_fields.iter().map(|field| {
-                    let field_name = crate::utils::create_safe_ident(&field.name);
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
                     
+                    // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                    let pubkey_serde_attr = if Self::is_field_pubkey_type(&field.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -53,7 +79,8 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
                 // 优先级2：从字段分配获取字段
                 let field_tokens = allocated_fields.iter().map(|field_def| {
-                    let field_name = crate::utils::create_safe_ident(&field_def.name);
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     // 使用改进的类型转换逻辑
                     let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                     let field_docs = if field_def.docs.is_empty() { 
@@ -62,8 +89,17 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                         DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                     };
                     
+                    // 检查字符串字段类型是否为 Pubkey
+                    let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -75,7 +111,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             if let Some(fields) = struct_fields {
                 quote! {
                     #doc_comments
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                    #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #struct_name {
                         // NonAnchor Events不需要discriminator字段
@@ -86,7 +122,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 // 优先级3：创建空结构体
                 quote! {
                     #doc_comments
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq, Default)]
+                    #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq, Default)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #struct_name;
                 }
@@ -128,8 +164,10 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 quote! { [#inner_type_token; #size_literal] }
             },
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { defined } => {
-                let type_name = syn::Ident::new(defined, proc_macro2::Span::call_site());
-                quote! { #type_name }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", defined);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Complex { kind, params } => {
                 // 处理复合类型，如 Vec<T>, Option<T>, [T; N] 等 (Legacy支持)
@@ -195,7 +233,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 #[derive(Clone, Debug, PartialEq)]
                 pub struct #wrapper_name(pub #struct_name);
                 
-                impl BorshSerialize for #wrapper_name {
+                impl borsh::BorshSerialize for #wrapper_name {
                     fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
                         // Serialize 1-byte discriminator for non-Anchor events
                         #discm_const_name.serialize(writer)?;
@@ -271,17 +309,28 @@ impl<'a> NonAnchorEventsTemplate<'a> {
         let (event_fields, default_fields) = if let Some(fields) = &event.fields {
             // 优先级1：直接使用event.fields
             let fields_tokens = fields.iter().map(|field| {
-                let field_name = crate::utils::create_safe_ident(&field.name);
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = self.convert_event_field_type(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
+                // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                let pubkey_serde_attr = if Self::is_field_pubkey_type(&field.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
             let default_values = fields.iter().map(|field| {
-                let field_name = crate::utils::create_safe_ident(&field.name);
+                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
             (
@@ -291,7 +340,8 @@ impl<'a> NonAnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 优先级2：从字段分配获取字段
             let fields_tokens = allocated_fields.iter().map(|field_def| {
-                let field_name = crate::utils::create_safe_ident(&field_def.name);
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 // 使用改进的类型转换逻辑
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                 let field_docs = if field_def.docs.is_empty() { 
@@ -300,13 +350,23 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                     DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                 };
                 
+                // 检查字符串字段类型是否为 Pubkey
+                let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
+                    #serde_attr
+                    #pubkey_serde_attr
                     pub #field_name: #field_type,
                 }
             });
             let default_values = allocated_fields.iter().map(|field_def| {
-                let field_name = crate::utils::create_safe_ident(&field_def.name);
+                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
             (
@@ -327,12 +387,10 @@ impl<'a> NonAnchorEventsTemplate<'a> {
         let imports = if has_types_module {
             quote! {
                 use crate::types::*;
-                use borsh::{BorshDeserialize, BorshSerialize};
                 use solana_pubkey::Pubkey;
             }
         } else {
             quote! {
-                use borsh::{BorshDeserialize, BorshSerialize};
                 use solana_pubkey::Pubkey;
             }
         };
@@ -348,7 +406,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             
             // Event Structure
             #doc_comments
-            #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+            #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct #event_name {
                 #event_fields
@@ -364,7 +422,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
 
             // Event Wrapper
             #doc_comments
-            #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+            #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct #wrapper_name {
                 pub discriminator: u8,
@@ -386,9 +444,8 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 }
                 
                 pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-                    borsh::from_slice(data).map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-                    })
+                    borsh::BorshDeserialize::deserialize(&mut &data[..])
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
                 }
             }
 
@@ -416,9 +473,8 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                         ));
                     }
                     
-                    borsh::from_slice(data).map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-                    })
+                    borsh::BorshDeserialize::deserialize(&mut &data[..])
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
                 }
             }
         }

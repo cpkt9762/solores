@@ -16,6 +16,7 @@ use crate::templates::common::{
     import_manager::{ImportManager, ImportType, SolanaImport},
     naming_converter::NamingConverter
 };
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
 
 /// Anchor Instructions 模板
 pub struct AnchorInstructionsTemplate<'a> {
@@ -99,8 +100,10 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             },
             // This pattern is handled by the Basic variant above
             AnchorFieldType::defined(type_name) => {
-                let type_ident = syn::Ident::new(type_name, proc_macro2::Span::call_site());
-                quote! { #type_ident }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", type_name);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             AnchorFieldType::array(inner_type, size) => {
                 let inner_token = Self::convert_anchor_field_type_to_rust(inner_type);
@@ -279,7 +282,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 #discm_const_name => {
                     check_min_accounts_req(accounts, #accounts_len_const, #instruction_name_str)?;
                     let ix_accounts = #keys_struct_name::from(&accounts[..#accounts_len_const]);
-                    let args = #args_struct_name::deserialize(&mut &data[..])?;
+                    let args = #args_struct_name::from_bytes(&data[..])?;
                     Ok(#program_name::#variant_name(ix_accounts, args))
                 },
             }
@@ -311,10 +314,20 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             
             let args_fields = if let Some(args) = &ix.args {
                 let fields = args.iter().map(|arg| {
-                    let field_name = syn::Ident::new(&arg.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&arg.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
                     
+                    // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -330,7 +343,8 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             
             let default_impl = if let Some(args) = &ix.args {
                 let default_fields = args.iter().map(|arg| {
-                    let field_name = syn::Ident::new(&arg.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     quote! { #field_name: Default::default(), }
                 });
                 quote! {
@@ -343,9 +357,30 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 }
             };
 
+            // 生成 new() 方法的参数和赋值
+            let (new_method_args, new_method_assignments) = if let Some(args) = &ix.args {
+                let arg_params = args.iter().map(|arg| {
+                    let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
+                    let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
+                    quote! { #field_name: #field_type }
+                });
+                let arg_assignments = args.iter().map(|arg| {
+                    let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
+                    quote! { #field_name, }
+                });
+                (
+                    quote! { #(#arg_params),* },
+                    quote! { #(#arg_assignments)* }
+                )
+            } else {
+                (quote! {}, quote! {})
+            };
+
             quote! {
                 #doc_comments
-                #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+                #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
                 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                 pub struct #struct_name {
                     #args_fields
@@ -360,12 +395,19 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 }
 
                 impl #struct_name {
-                    pub fn serialize<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-                        BorshSerialize::serialize(self, &mut writer)
+                    pub fn new(#new_method_args) -> Self {
+                        Self {
+                            discriminator: Self::discriminator(),
+                            #new_method_assignments
+                        }
                     }
                     
-                    pub fn deserialize(buf: &[u8]) -> std::io::Result<Self> {
-                        BorshDeserialize::deserialize(&mut &buf[..])
+                    pub fn from_bytes(buf: &[u8]) -> std::io::Result<Self> {
+                        borsh::BorshDeserialize::deserialize(&mut &buf[..])
+                    }
+                    
+                    pub fn discriminator() -> [u8; 8] {
+                        #discm_const_name
                     }
                     
                     pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
@@ -376,8 +418,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         });
 
         quote! {
-            use borsh::{BorshDeserialize, BorshSerialize};
-            
+                        
             #(#arg_structs)*
         }
     }
@@ -456,7 +497,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 };
                 (
                     quote! {
-                        let metas: [AccountMeta; #accounts_len_const] = keys.into();
+                        let metas: [solana_instruction::AccountMeta; #accounts_len_const] = keys.into();
                         #args_creation
                     },
                     quote! { Vec::from(metas) },
@@ -552,10 +593,22 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         
         let args_fields = if let Some(args) = &ix.args {
             let fields = args.iter().map(|arg| {
-                let field_name_str = naming_converter.convert_field_name(&arg.name);
-                let field_name = syn::Ident::new(&field_name_str, proc_macro2::Span::call_site());
+                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&arg.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
-                quote! { pub #field_name: #field_type, }
+                
+                // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) {
+                    generate_pubkey_serde_attr()
+                } else {
+                    quote! {}
+                };
+                
+                quote! { 
+                    #serde_attr
+                    #pubkey_serde_attr
+                    pub #field_name: #field_type, 
+                }
             });
             quote! {
                 pub discriminator: [u8; 8],
@@ -569,8 +622,8 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         
         let default_impl = if let Some(args) = &ix.args {
             let default_fields = args.iter().map(|arg| {
-                let field_name_str = naming_converter.convert_field_name(&arg.name);
-                let field_name = syn::Ident::new(&field_name_str, proc_macro2::Span::call_site());
+                let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
             quote! {
@@ -581,6 +634,27 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             quote! {
                 discriminator: #discm_const_name,
             }
+        };
+
+        // 生成 new() 方法的参数和赋值
+        let (new_method_args, new_method_assignments) = if let Some(args) = &ix.args {
+            let arg_params = args.iter().map(|arg| {
+                let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
+                let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
+                quote! { #field_name: #field_type }
+            });
+            let arg_assignments = args.iter().map(|arg| {
+                let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
+                quote! { #field_name, }
+            });
+            (
+                quote! { #(#arg_params),* },
+                quote! { #(#arg_assignments)* }
+            )
+        } else {
+            (quote! {}, quote! {})
         };
 
         // 生成客户端函数名称
@@ -623,7 +697,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             };
             (
                 quote! {
-                    let metas: [AccountMeta; #accounts_len_const] = keys.into();
+                    let metas: [solana_instruction::AccountMeta; #accounts_len_const] = keys.into();
                     #args_creation
                 },
                 quote! { Vec::from(metas) },
@@ -677,7 +751,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         let keys_into_metas_fields = if let Some(accounts) = &ix.accounts {
             accounts.iter().map(|account| {
                 let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
-                quote! { AccountMeta::new(keys.#field_name, false), }
+                quote! { solana_instruction::AccountMeta::new(keys.#field_name, false), }
             }).collect()
         } else {
             vec![]
@@ -698,7 +772,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             
             // Instruction Data Structure
             #doc_comments
-            #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+            #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct #struct_name {
                 #args_fields
@@ -713,12 +787,19 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             }
 
             impl #struct_name {
-                pub fn serialize<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-                    BorshSerialize::serialize(self, &mut writer)
+                pub fn new(#new_method_args) -> Self {
+                    Self {
+                        discriminator: Self::discriminator(),
+                        #new_method_assignments
+                    }
                 }
                 
-                pub fn deserialize(buf: &[u8]) -> std::io::Result<Self> {
-                    BorshDeserialize::deserialize(&mut &buf[..])
+                pub fn from_bytes(buf: &[u8]) -> std::io::Result<Self> {
+                    borsh::BorshDeserialize::deserialize(&mut &buf[..])
+                }
+                
+                pub fn discriminator() -> [u8; 8] {
+                    #discm_const_name
                 }
                 
                 pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
@@ -740,14 +821,6 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 }
             }
 
-            impl From<[Pubkey; #accounts_len_const]> for #keys_struct_name {
-                fn from(pubkeys: [Pubkey; #accounts_len_const]) -> Self {
-                    Self {
-                        #(#keys_from_array_fields)*
-                    }
-                }
-            }
-
             impl From<&[Pubkey]> for #keys_struct_name {
                 fn from(pubkeys: &[Pubkey]) -> Self {
                     Self {
@@ -756,7 +829,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 }
             }
 
-            impl From<#keys_struct_name> for [AccountMeta; #accounts_len_const] {
+            impl From<#keys_struct_name> for [solana_instruction::AccountMeta; #accounts_len_const] {
                 fn from(keys: #keys_struct_name) -> Self {
                     [
                         #(#keys_into_metas_fields)*
@@ -916,5 +989,18 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         import_manager.mark_as_used("solana_pubkey");
         
         import_manager.generate_optimized_imports()
+    }
+    
+    /// 检查 Anchor 字段类型是否为 Pubkey
+    fn is_anchor_field_pubkey_type(field_type: &AnchorFieldType) -> bool {
+        match field_type {
+            AnchorFieldType::Basic(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            AnchorFieldType::PrimitiveOrPubkey(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            _ => false
+        }
     }
 }

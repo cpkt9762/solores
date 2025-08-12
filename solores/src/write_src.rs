@@ -166,7 +166,8 @@ pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<()
             let module_ident = Ident::new(module_name, Span::call_site());
             contents.extend(quote! {
                 pub mod #module_ident;
-                pub use #module_ident::*;
+                // 不再使用通配符导出，用户需要使用完整路径访问模块内容
+                // 例如: use crate::instructions::CreatePool; 
             });
         }
         

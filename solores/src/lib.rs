@@ -145,6 +145,12 @@ pub struct Args {
         default_value = "./batch_output"
     )]
     pub batch_output_dir: PathBuf,
+
+    #[arg(
+        long,
+        help = "generate test code for parsers (默认不生成测试以减少文件数量)"
+    )]
+    pub test: bool,
 }
 
 /// The CLI entrypoint

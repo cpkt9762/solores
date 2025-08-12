@@ -8,7 +8,10 @@ use std::{
     str::FromStr,
 };
 
-use heck::ToPascalCase;
+use heck::{ToPascalCase, ToSnakeCase};
+use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
+use quote::quote;
 use serde::{
     de::{self, MapAccess, Visitor},
     Deserialize, Deserializer,
@@ -226,5 +229,83 @@ mod tests {
         let input = "Uppercase";
         let expected = "Uppercase";
         assert_eq!(conditional_pascal_case(input), expected);
+    }
+}
+
+/// 字段名转换工具：将 camelCase 转换为 snake_case，并生成对应的条件编译 serde rename 属性
+/// 
+/// # Arguments
+/// * `camel_name` - camelCase 格式的字段名
+/// 
+/// # Returns
+/// * `(snake_case_name, conditional_serde_attribute_token)`
+pub fn to_snake_case_with_serde(camel_name: &str) -> (String, TokenStream) {
+    let snake_name = camel_name.to_case(Case::Snake);
+    let safe_snake_name = sanitize_field_name(&snake_name);
+    
+    // 如果转换后的名称与原名称不同，生成条件编译的 serde rename 属性
+    let serde_attr = if safe_snake_name != camel_name {
+        quote! { #[cfg_attr(feature = "serde", serde(rename = #camel_name))] }
+    } else {
+        quote! {}
+    };
+    
+    (safe_snake_name, serde_attr)
+}
+
+/// 检查字段名是否需要重命名（是否为 camelCase）
+pub fn needs_snake_case_conversion(name: &str) -> bool {
+    let snake_version = name.to_case(Case::Snake);
+    snake_version != name
+}
+
+/// 为 Pubkey 类型生成条件编译的 serde 序列化属性
+/// 
+/// 使用 serde_with::DisplayFromStr 将 Pubkey 序列化为字符串格式
+/// 
+/// # Returns
+/// * `TokenStream` - 生成的 serde 属性代码
+pub fn generate_pubkey_serde_attr() -> TokenStream {
+    quote! {
+        #[cfg_attr(
+            feature = "serde",
+            serde(with = "serde_with::As::<serde_with::DisplayFromStr>")
+        )]
+    }
+}
+
+/// 检查字段类型是否为 Pubkey
+pub fn is_pubkey_type(type_str: &str) -> bool {
+    matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
+}
+
+#[cfg(test)]
+mod field_naming_tests {
+    use super::*;
+
+    #[test]
+    fn test_camel_to_snake_conversion() {
+        let (snake_name, _) = to_snake_case_with_serde("buyOrders");
+        assert_eq!(snake_name, "buy_orders");
+    }
+
+    #[test]
+    fn test_target_x_conversion() {
+        let (snake_name, _) = to_snake_case_with_serde("targetX");
+        assert_eq!(snake_name, "target_x");
+    }
+
+    #[test]
+    fn test_already_snake_case() {
+        let (snake_name, _) = to_snake_case_with_serde("already_snake");
+        assert_eq!(snake_name, "already_snake");
+    }
+
+    #[test]
+    fn test_needs_conversion_check() {
+        assert!(needs_snake_case_conversion("buyOrders"));
+        assert!(needs_snake_case_conversion("targetX"));
+        assert!(!needs_snake_case_conversion("already_snake"));
+        assert!(!needs_snake_case_conversion("simple"));
     }
 }

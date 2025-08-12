@@ -13,6 +13,7 @@ use crate::Args;
 use crate::templates::{TemplateGenerator, TypesTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator};
 use crate::templates::field_analyzer::{FieldAllocationAnalyzer, FieldAllocationMap};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
 
 /// Anchor Types 模板
 pub struct AnchorTypesTemplate<'a> {
@@ -104,19 +105,29 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
                 match type_kind {
                     crate::idl_format::anchor_idl::AnchorTypeKind::Struct(struct_def) => {
                         let struct_fields = struct_def.iter().map(|field| {
-                            let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                            let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                            let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                             let field_type = self.convert_idl_type_to_rust(&field.field_type);
                             let field_docs = DocGenerator::generate_field_docs(&field.docs);
                             
+                            // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                            let pubkey_serde_attr = if self.is_field_pubkey_type(&field.field_type) {
+                                generate_pubkey_serde_attr()
+                            } else {
+                                quote! {}
+                            };
+                            
                             quote! {
                                 #field_docs
+                                #serde_attr
+                                #pubkey_serde_attr
                                 pub #field_name: #field_type,
                             }
                         });
 
                         quote! {
                             #doc_comments
-                            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq, Default)]
+                            #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq, Default)]
                             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                             pub struct #type_name {
                                 #(#struct_fields)*
@@ -162,7 +173,7 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
 
                         quote! {
                             #doc_comments
-                            #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq)]
+                            #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq)]
                             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                             pub enum #type_name {
                                 #(#enum_variants)*
@@ -184,7 +195,7 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
                 // Fallback for types without definition
                 quote! {
                     #doc_comments
-                    #[derive(Clone, Debug, BorshDeserialize, BorshSerialize, PartialEq, Eq, Default)]
+                    #[derive(Clone, Debug, borsh::BorshDeserialize, borsh::BorshSerialize, PartialEq, Eq, Default)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #type_name;
                 }
@@ -227,8 +238,10 @@ impl<'a> AnchorTypesTemplate<'a> {
                 }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => {
-                let type_name = syn::Ident::new(type_name, proc_macro2::Span::call_site());
-                quote! { #type_name }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", type_name);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, size) => {
                 let inner_type = self.convert_idl_type_to_rust(inner_type);
@@ -281,26 +294,37 @@ impl<'a> AnchorTypesTemplate<'a> {
             match type_kind {
             crate::idl_format::anchor_idl::AnchorTypeKind::Struct(struct_def) => {
                 let fields = struct_def.iter().map(|field| {
-                    let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = self.convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
                     
+                    // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
+                    let pubkey_serde_attr = if self.is_field_pubkey_type(&field.field_type) {
+                        generate_pubkey_serde_attr()
+                    } else {
+                        quote! {}
+                    };
+                    
                     quote! {
                         #field_docs
+                        #serde_attr
+                        #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
 
                 // Generate Default implementation for struct
                 let default_assignments = struct_def.iter().map(|field| {
-                    let field_name = syn::Ident::new(&field.name, proc_macro2::Span::call_site());
+                    let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                    let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = self.generate_default_value_for_field_type(&field.field_type);
                     quote! { #field_name: #default_value, }
                 });
 
                 quote! {
                     #doc_comments
-                    #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+                    #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub struct #type_name {
                         #(#fields)*
@@ -369,7 +393,7 @@ impl<'a> AnchorTypesTemplate<'a> {
 
                 quote! {
                     #doc_comments
-                    #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+                    #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
                     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                     pub enum #type_name {
                         #(#variants)*
@@ -391,7 +415,7 @@ impl<'a> AnchorTypesTemplate<'a> {
             // Fallback for types without definition
             quote! {
                 #doc_comments
-                #[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+                #[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
                 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
                 pub struct #type_name;
                 
@@ -407,9 +431,8 @@ impl<'a> AnchorTypesTemplate<'a> {
             #![doc = #type_name_str]
             #doc_comments
             
-            use borsh::{BorshDeserialize, BorshSerialize};
+            #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
-            use crate::*;
             
             #type_definition
 
@@ -456,6 +479,19 @@ impl<'a> AnchorTypesTemplate<'a> {
                 }
             },
             _ => quote! { Default::default() }
+        }
+    }
+
+    /// 检查字段类型是否为 Pubkey
+    fn is_field_pubkey_type(&self, field_type: &crate::idl_format::anchor_idl::AnchorFieldType) -> bool {
+        match field_type {
+            crate::idl_format::anchor_idl::AnchorFieldType::Basic(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::PrimitiveOrPubkey(s) => {
+                matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            _ => false
         }
     }
 }
