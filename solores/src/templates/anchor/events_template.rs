@@ -497,7 +497,8 @@ impl<'a> AnchorEventsTemplate<'a> {
             #![doc = #event_doc_comment]
             #doc_comments
             
-                        use solana_pubkey::Pubkey;
+            #[allow(unused_imports)]
+            use solana_pubkey::Pubkey;
             
             // Constants
             pub const #const_name: [u8; 8] = #discriminator;

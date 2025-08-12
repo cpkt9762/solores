@@ -467,9 +467,9 @@ impl ImportManager {
         
         // 排序并生成TokenStream
         imports.sort();
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {
@@ -521,9 +521,9 @@ impl ImportManager {
         log::debug!("🚫 跳过types通配符导入 - 使用完整路径 crate::types::");
         
         // 转换为TokenStream
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {
@@ -570,9 +570,9 @@ impl ImportManager {
         // 不再自动添加types通配符导入，代码中已使用完整路径
         
         // 转换为TokenStream
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {
@@ -601,9 +601,9 @@ impl ImportManager {
         }
         
         // 转换为TokenStream
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {
@@ -643,17 +643,14 @@ impl ImportManager {
     pub fn generate_smart_error_imports(code_content: &str) -> TokenStream {
         let mut imports = Vec::new();
         
-        // ProgramError导入（如果代码中使用了）
-        if code_content.contains("ProgramError") {
-            imports.push("use solana_program_error::ProgramError;".to_string());
-        }
+        // 移除 ProgramError 导入，代码中使用 solana_program_error::ProgramError 完整路径
         
         // 移除 thiserror::Error 导入，代码中使用 thiserror::Error 完整路径
         
         // 转换为TokenStream
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {
@@ -677,9 +674,9 @@ impl ImportManager {
         // 移除 std::io::Write 导入，代码中使用 std::io::Write 完整路径
         
         // 转换为TokenStream
-        let import_tokens: Result<Vec<TokenStream>, _> = imports
+        let import_tokens: Result<Vec<TokenStream>, proc_macro2::LexError> = imports
             .iter()
-            .map(|s| s.parse())
+            .map(|s: &String| s.parse())
             .collect();
         
         match import_tokens {

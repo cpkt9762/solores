@@ -30,15 +30,16 @@ impl<'a> AnchorAccountsTemplate<'a> {
 
     /// 生成智能的默认值，处理大数组等特殊情况
     fn generate_smart_default_value(field_type: &str) -> TokenStream {
-        // 检查是否是大数组类型
-        if field_type.starts_with("[u8; ") && field_type.ends_with("]") {
-            // 提取数组大小
-            if let Some(size_str) = field_type.strip_prefix("[u8; ").and_then(|s| s.strip_suffix("]")) {
-                if let Ok(size) = size_str.parse::<usize>() {
-                    if size > 32 {
-                        // 大数组需要特殊处理，因为Rust不为大于32的数组实现Default
-                        let size_literal = proc_macro2::Literal::usize_unsuffixed(size);
-                        return quote! { [0u8; #size_literal] };
+        // 检查是否是数组类型
+        if field_type.starts_with("[") && field_type.ends_with("]") {
+            // 提取数组信息：[type; size]
+            if let Some(inner) = field_type.strip_prefix("[").and_then(|s| s.strip_suffix("]")) {
+                if let Some((type_part, size_part)) = inner.rsplit_once("; ") {
+                    if let Ok(size) = size_part.parse::<usize>() {
+                        if size > 32 {
+                            // 大数组需要使用 unsafe { std::mem::zeroed() }
+                            return quote! { unsafe { std::mem::zeroed() } };
+                        }
                     }
                 }
             }
@@ -528,17 +529,75 @@ impl<'a> AnchorAccountsTemplate<'a> {
             AnchorFieldType::array(inner_type, size) => {
                 // Handle specific array types based on inner type
                 let size_literal = proc_macro2::Literal::usize_unsuffixed(*size);
-                match &**inner_type {
-                    AnchorFieldType::Basic(primitive) => {
-                        match primitive.as_str() {
-                            "u64" => quote! { [0u64; #size_literal] },
-                            "u32" => quote! { [0u32; #size_literal] },
-                            "u16" => quote! { [0u16; #size_literal] },
-                            "u8" => quote! { [0u8; #size_literal] },
-                            _ => quote! { Default::default() },
-                        }
-                    },
-                    _ => quote! { Default::default() },
+                
+                // For arrays larger than 32, we need to use manual initialization
+                // since Rust doesn't implement Default for arrays > 32
+                if *size > 32 {
+                    match &**inner_type {
+                        AnchorFieldType::Basic(primitive) => {
+                            match primitive.as_str() {
+                                "u128" => quote! { [0u128; #size_literal] },
+                                "u64" => quote! { [0u64; #size_literal] },
+                                "u32" => quote! { [0u32; #size_literal] },
+                                "u16" => quote! { [0u16; #size_literal] },
+                                "u8" => quote! { [0u8; #size_literal] },
+                                "i128" => quote! { [0i128; #size_literal] },
+                                "i64" => quote! { [0i64; #size_literal] },
+                                "i32" => quote! { [0i32; #size_literal] },
+                                "i16" => quote! { [0i16; #size_literal] },
+                                "i8" => quote! { [0i8; #size_literal] },
+                                _ => {
+                                    // For large arrays, Rust doesn't implement Default for [T; N] where N > 32
+                                    if *size > 32 {
+                                        quote! { unsafe { std::mem::zeroed() } }
+                                    } else {
+                                        quote! { [Default::default(); #size_literal] }
+                                    }
+                                },
+                            }
+                        },
+                        AnchorFieldType::defined(type_name) => {
+                            // For defined types (structs/enums) in large arrays, manually create each element
+                            let type_path = format!("crate::types::{}", type_name);
+                            match syn::parse_str::<syn::Path>(&type_path) {
+                                Ok(path) => {
+                                    if *size > 32 {
+                                        quote! { unsafe { std::mem::zeroed() } }
+                                    } else {
+                                        quote! { [#path::default(); #size_literal] }
+                                    }
+                                },
+                                Err(_) => {
+                                    log::warn!("⚠️ 无法解析类型路径: {}, 使用零值初始化", type_path);
+                                    quote! { unsafe { std::mem::zeroed() } }
+                                }
+                            }
+                        },
+                        _ => {
+                            log::warn!("⚠️ 大数组未知类型，使用零值初始化");
+                            quote! { unsafe { std::mem::zeroed() } }
+                        },
+                    }
+                } else {
+                    // For small arrays (≤ 32), we can use Default::default()
+                    match &**inner_type {
+                        AnchorFieldType::Basic(primitive) => {
+                            match primitive.as_str() {
+                                "u128" => quote! { [0u128; #size_literal] },
+                                "u64" => quote! { [0u64; #size_literal] },
+                                "u32" => quote! { [0u32; #size_literal] },
+                                "u16" => quote! { [0u16; #size_literal] },
+                                "u8" => quote! { [0u8; #size_literal] },
+                                "i128" => quote! { [0i128; #size_literal] },
+                                "i64" => quote! { [0i64; #size_literal] },
+                                "i32" => quote! { [0i32; #size_literal] },
+                                "i16" => quote! { [0i16; #size_literal] },
+                                "i8" => quote! { [0i8; #size_literal] },
+                                _ => quote! { Default::default() },
+                            }
+                        },
+                        _ => quote! { Default::default() },
+                    }
                 }
             },
             AnchorFieldType::vec(_) => quote! { Vec::new() },
@@ -680,7 +739,8 @@ impl<'a> AnchorAccountsTemplate<'a> {
         quote! {
             #doc_comments
             
-                        use solana_pubkey::Pubkey;
+            #[allow(unused_imports)]
+            use solana_pubkey::Pubkey;
             
             // Constants
             pub const #const_name: [u8; 8] = #discriminator;

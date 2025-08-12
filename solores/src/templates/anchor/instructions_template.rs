@@ -142,12 +142,16 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         }
 
         let constants = instructions.iter().map(|ix| {
+            // 使用统一的命名转换器确保常量名称一致性
+            let mut naming_converter = self.naming_converter.borrow_mut();
+            let const_base_name = naming_converter.to_screaming_snake_case(&ix.name);
+            
             let discm_const_name = syn::Ident::new(
-                &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
+                &format!("{}_IX_DISCM", const_base_name),
                 proc_macro2::Span::call_site(),
             );
             let accounts_len_const = syn::Ident::new(
-                &format!("{}_IX_ACCOUNTS_LEN", ix.name.to_shouty_snake_case()),
+                &format!("{}_IX_ACCOUNTS_LEN", const_base_name),
                 proc_macro2::Span::call_site(),
             );
             
@@ -261,9 +265,14 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         let match_arms = instructions.iter().map(|ix| {
             let variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             let keys_struct_name = syn::Ident::new(&format!("{}Keys", ix.name.to_case(Case::Pascal)), proc_macro2::Span::call_site());
-            let accounts_len_const = syn::Ident::new(&format!("{}_IX_ACCOUNTS_LEN", ix.name.to_shouty_snake_case()), proc_macro2::Span::call_site());
+            
+            // 使用统一的命名转换器确保常量名称一致性
+            let mut naming_converter = self.naming_converter.borrow_mut();
+            let const_base_name = naming_converter.to_screaming_snake_case(&ix.name);
+            
+            let accounts_len_const = syn::Ident::new(&format!("{}_IX_ACCOUNTS_LEN", const_base_name), proc_macro2::Span::call_site());
             let discm_const_name = syn::Ident::new(
-                &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
+                &format!("{}_IX_DISCM", const_base_name),
                 proc_macro2::Span::call_site(),
             );
             let instruction_name_str = ix.name.to_case(Case::Pascal);
@@ -305,8 +314,12 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 &format!("{}IxData", ix.name.to_case(Case::Pascal)),
                 proc_macro2::Span::call_site(),
             );
+            // 使用统一的命名转换器确保常量名称一致性
+            let mut naming_converter = self.naming_converter.borrow_mut();
+            let const_base_name = naming_converter.to_screaming_snake_case(&ix.name);
+            
             let discm_const_name = syn::Ident::new(
-                &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
+                &format!("{}_IX_DISCM", const_base_name),
                 proc_macro2::Span::call_site(),
             );
             
@@ -537,6 +550,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
 
         quote! {
             use solana_instruction::{AccountMeta, Instruction};
+            #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
             
             #(#client_functions)*

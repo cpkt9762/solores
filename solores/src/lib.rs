@@ -4,7 +4,7 @@ use std::{
     env,
     fs::{self, File, OpenOptions},
     io::Read,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -153,6 +153,64 @@ pub struct Args {
     pub test: bool,
 }
 
+/// 获取用于错误显示的绝对路径字符串
+/// 优先使用 canonicalize，如果失败则手动构建绝对路径
+fn get_absolute_path_for_error(path: &Path) -> String {
+    // 先尝试 canonicalize 获取真实绝对路径（处理符号链接等）
+    if let Ok(canonical_path) = fs::canonicalize(path) {
+        return canonical_path.display().to_string();
+    }
+    
+    // 如果 canonicalize 失败（通常是因为文件不存在）
+    // 手动构建绝对路径用于错误显示
+    if path.is_absolute() {
+        // 已经是绝对路径，直接返回
+        path.display().to_string()
+    } else {
+        // 相对路径，与当前目录组合，然后尝试清理路径
+        match env::current_dir() {
+            Ok(current_dir) => {
+                let combined_path = current_dir.join(path);
+                
+                // 尝试清理路径（去掉 .. 和 . 等）
+                // 注意：这种方法对不存在的文件也有效
+                clean_path(&combined_path).display().to_string()
+            }
+            Err(_) => {
+                // 如果连当前目录都获取不到，回退到原始路径
+                path.display().to_string()
+            }
+        }
+    }
+}
+
+/// 清理路径，去掉 .. 和 . 等路径组件
+/// 即使文件不存在也能正常工作
+fn clean_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {
+                // 忽略当前目录 "."
+            }
+            std::path::Component::ParentDir => {
+                // 处理父目录 ".."
+                if !components.is_empty() && components.last() != Some(&std::path::Component::ParentDir) {
+                    components.pop();
+                } else if components.is_empty() {
+                    components.push(component);
+                }
+            }
+            _ => {
+                components.push(component);
+            }
+        }
+    }
+    
+    components.iter().collect()
+}
+
 /// The CLI entrypoint
 pub fn main() {
     if env::var(RUST_LOG_ENV_VAR).is_err() {
@@ -172,7 +230,18 @@ pub fn main() {
 
 /// Process a single IDL file (original functionality)
 fn process_single_file(mut args: Args) {
-    let mut file = OpenOptions::new().read(true).open(&args.idl_path).unwrap();
+    let mut file = match OpenOptions::new().read(true).open(&args.idl_path) {
+        Ok(f) => f,
+        Err(e) => {
+            let error = SoloresError::file_operation_error(
+                "读取IDL文件",
+                get_absolute_path_for_error(&args.idl_path),
+                e
+            );
+            eprintln!("{}", format_user_error(&error));
+            std::process::exit(1);
+        }
+    };
 
     let idl = load_idl(&mut file);
 
@@ -369,7 +438,10 @@ fn process_single_idl_file(base_args: &Args, idl_file_path: &PathBuf) -> Result<
     // Load and validate IDL
     let mut file = match OpenOptions::new().read(true).open(&args.idl_path) {
         Ok(f) => f,
-        Err(e) => return Err(format!("无法打开文件: {}", e)),
+        Err(e) => {
+            let abs_path = get_absolute_path_for_error(&args.idl_path);
+            return Err(format!("无法打开文件 {}: {}", abs_path, e));
+        }
     };
 
     let idl = match load_idl_safely(&mut file) {

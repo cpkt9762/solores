@@ -158,6 +158,7 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                     "bool" => syn::Ident::new("bool", proc_macro2::Span::call_site()),
                     "string" | "String" => syn::Ident::new("String", proc_macro2::Span::call_site()),
                     "publicKey" | "pubkey" | "Pubkey" => syn::Ident::new("Pubkey", proc_macro2::Span::call_site()),
+                    "bytes" => return quote! { Vec<u8> }, // bytes类型映射为Vec<u8>
                     _ => syn::Ident::new(type_str, proc_macro2::Span::call_site()),
                 };
                 quote! { #type_ident }
