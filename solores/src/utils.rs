@@ -8,7 +8,7 @@ use std::{
     str::FromStr,
 };
 
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::ToPascalCase;
 use convert_case::{Case, Casing};
 use proc_macro2::TokenStream;
 use quote::quote;

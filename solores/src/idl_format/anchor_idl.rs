@@ -100,11 +100,11 @@ pub struct AnchorAccount {
 pub struct AnchorAccountConstraint {
     /// 账户名称
     pub name: String,
-    /// 是否可变 - 支持writable, is_write, is_mut等多种命名
-    #[serde(alias = "writable", alias = "is_write", default)]
+    /// 是否可变 - 支持writable, is_write, is_mut, isMut等多种命名
+    #[serde(alias = "writable", alias = "is_write", alias = "isMut", default)]
     pub is_mut: bool,
-    /// 是否签名者 - 映射到标准字段名
-    #[serde(alias = "signer", default)]
+    /// 是否签名者 - 映射到标准字段名，支持signer, isSigner等
+    #[serde(alias = "signer", alias = "isSigner", default)]
     pub is_signer: bool,
     /// 是否可选
     pub is_optional: Option<bool>,
@@ -451,11 +451,14 @@ impl AnchorIdl {
             serde_json::Error::custom("IDL must be a JSON object")
         })?;
         
-        // 获取address字段（必需）
-        let address = obj.get("address")
+        // 获取address字段（优先从metadata.address获取，其次从顶级address）
+        let address = obj.get("metadata")
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("address"))
             .and_then(|v| v.as_str())
+            .or_else(|| obj.get("address").and_then(|v| v.as_str()))
             .ok_or_else(|| {
-                log::debug!("❌ Anchor IDL缺少address字段");
+                log::debug!("❌ Anchor IDL缺少address字段（在metadata.address或顶级address）");
                 serde_json::Error::custom("Missing required field: address")
             })?
             .to_string();
@@ -791,7 +794,7 @@ impl AnchorFieldType {
         // 递归深度监控
         let depth = ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         
-        if depth > 200 {
+        if depth > 500 {
             ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("AnchorFieldType recursion too deep: {}", depth));
         }
@@ -910,7 +913,7 @@ impl AnchorTypeKind {
         let depth = ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         eprintln!("📊 AnchorTypeKind recursion depth: {}", depth);
         
-        if depth > 200 {
+        if depth > 500 {
             eprintln!("🚨 AnchorTypeKind RECURSION LIMIT EXCEEDED! Depth: {}", depth);
             ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("AnchorTypeKind recursion too deep: {}", depth));

@@ -1,10 +1,14 @@
 {
-  "address": "swapNyd8XiQwJ6ianp9snpu4brUqFxadzvHebnAXjJZ",
   "metadata": {
     "name": "stable_swap",
     "version": "1.5.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "address": "swapNyd8XiQwJ6ianp9snpu4brUqFxadzvHebnAXjJZ",
+    "description": "Stable Swap - Low slippage automated market maker optimized for stable asset pairs",
+    "origin": "anchor",
+    "repository": "https://github.com/mercurial-finance/stable-swap",
+    "documentation": "https://docs.mercurial.finance/",
+    "category": "defi"
   },
   "instructions": [
     {

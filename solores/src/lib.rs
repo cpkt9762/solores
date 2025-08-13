@@ -19,11 +19,13 @@ pub mod error;
 pub mod idl_format;
 pub mod templates;  // 新增模板系统
 pub mod utils;
+pub mod workspace;  // 新增workspace生成功能
 pub mod write_gitignore;
 pub mod write_readme;
 pub mod write_src;
 
-use templates::common::cargo_generator::write_fine_grained_cargo_toml;
+use templates::common::cargo_generator::{write_fine_grained_cargo_toml, write_workspace_member_cargo_toml, should_use_workspace_cargo_toml};
+use workspace::{validate_workspace_config, add_workspace_member, finalize_workspace};
 use write_gitignore::write_gitignore;
 use write_readme::write_readme;
 use write_src::*;
@@ -151,6 +153,19 @@ pub struct Args {
         help = "generate test code for parsers (默认不生成测试以减少文件数量)"
     )]
     pub test: bool,
+
+    #[arg(
+        long,
+        help = "生成workspace结构（适用于批量处理）"
+    )]
+    pub workspace: bool,
+
+    #[arg(
+        long,
+        help = "指定workspace名称",
+        default_value = "solana_workspace"
+    )]
+    pub workspace_name: String,
 }
 
 /// 获取用于错误显示的绝对路径字符串
@@ -262,7 +277,13 @@ fn process_single_file(mut args: Args) {
 
     // TODO: multithread, 1 thread per generated file
     write_gitignore(&args).unwrap();
-    write_fine_grained_cargo_toml(&args, idl.as_ref()).unwrap();
+    
+    // Choose appropriate Cargo.toml generation based on workspace mode
+    if should_use_workspace_cargo_toml(&args) {
+        write_workspace_member_cargo_toml(&args, idl.as_ref()).unwrap();
+    } else {
+        write_fine_grained_cargo_toml(&args, idl.as_ref()).unwrap();
+    }
     
     log::info!("Writing lib.rs for IDL: {}", idl.program_name());
     log::debug!("IDL address: {:?}", idl.program_address());
@@ -338,6 +359,19 @@ fn process_batch(args: Args) {
     log::info!("📁 扫描目录: {}", args.idl_path.display());
     log::info!("📁 输出目录: {}", args.batch_output_dir.display());
 
+    // Initialize workspace configuration if enabled
+    let mut workspace_config = match validate_workspace_config(&args) {
+        Ok(Some(config)) => {
+            log::info!("🏗️  Workspace模式已启用: '{}'", config.name);
+            Some(config)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            log::error!("❌ Workspace配置验证失败: {}", e);
+            panic!("Failed to validate workspace configuration: {}", e);
+        }
+    };
+
     // Create batch output directory
     if let Err(e) = fs::create_dir_all(&args.batch_output_dir) {
         log::error!("❌ 无法创建批量输出目录: {}", e);
@@ -356,6 +390,7 @@ fn process_batch(args: Args) {
     let mut success_count = 0;
     let mut failure_count = 0;
     let mut failed_files = Vec::new();
+    let mut generated_crates = Vec::new();
 
     for (idx, idl_file) in idl_files.iter().enumerate() {
         log::info!("🔄 处理文件 {}/{}: {}", idx + 1, idl_files.len(), idl_file.display());
@@ -364,12 +399,28 @@ fn process_batch(args: Args) {
             Ok(output_dir) => {
                 success_count += 1;
                 log::info!("✅ 成功生成: {}", output_dir.display());
+                
+                // Add to workspace if enabled
+                if let Some(ref mut workspace) = workspace_config {
+                    if let Some(crate_name) = output_dir.file_name() {
+                        let crate_name_str = crate_name.to_string_lossy().to_string();
+                        add_workspace_member(workspace, crate_name_str.clone());
+                        generated_crates.push(crate_name_str);
+                    }
+                }
             }
             Err(e) => {
                 failure_count += 1;
                 log::error!("❌ 处理失败 {}: {}", idl_file.display(), e);
                 failed_files.push((idl_file.clone(), e));
             }
+        }
+    }
+
+    // Finalize workspace if enabled
+    if let Some(workspace) = workspace_config {
+        if let Err(e) = finalize_workspace(&workspace) {
+            log::error!("❌ Workspace生成失败: {}", e);
         }
     }
 
@@ -382,6 +433,14 @@ fn process_batch(args: Args) {
             log::warn!("   {} - {}", file.display(), error);
         }
     }
+    
+    if !generated_crates.is_empty() {
+        log::info!("📦 生成的crate:");
+        for crate_name in &generated_crates {
+            log::info!("   - {}", crate_name);
+        }
+    }
+    
     log::info!("📁 所有生成的库位于: {}", args.batch_output_dir.display());
 }
 
@@ -476,8 +535,15 @@ fn process_single_idl_file(base_args: &Args, idl_file_path: &PathBuf) -> Result<
         return Err(format!("生成.gitignore失败: {}", e));
     }
 
-    if let Err(e) = write_fine_grained_cargo_toml(&args, idl.as_ref()) {
-        return Err(format!("生成Cargo.toml失败: {}", e));
+    // Choose appropriate Cargo.toml generation based on workspace mode
+    if should_use_workspace_cargo_toml(&args) {
+        if let Err(e) = write_workspace_member_cargo_toml(&args, idl.as_ref()) {
+            return Err(format!("生成workspace成员Cargo.toml失败: {}", e));
+        }
+    } else {
+        if let Err(e) = write_fine_grained_cargo_toml(&args, idl.as_ref()) {
+            return Err(format!("生成Cargo.toml失败: {}", e));
+        }
     }
 
     if let Err(e) = write_lib(&args, idl.as_ref()) {

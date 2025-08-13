@@ -10,15 +10,17 @@ use heck::ToShoutySnakeCase;
 use crate::idl_format::non_anchor_idl::NonAnchorIdl;
 use crate::Args;
 use crate::templates::{TemplateGenerator, TypesTemplateGenerator};
-use crate::templates::common::{doc_generator::DocGenerator};
+use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
 use crate::templates::field_analyzer::{FieldAllocationAnalyzer, FieldAllocationMap};
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::utils::{generate_pubkey_serde_attr};
+use std::cell::RefCell;
 
 /// 非 Anchor Types 模板
 pub struct NonAnchorTypesTemplate<'a> {
     pub idl: &'a NonAnchorIdl,
     pub args: &'a Args,
     pub field_allocation: FieldAllocationMap,
+    naming_converter: RefCell<NamingConverter>,
 }
 
 impl<'a> NonAnchorTypesTemplate<'a> {
@@ -26,7 +28,23 @@ impl<'a> NonAnchorTypesTemplate<'a> {
     pub fn new(idl: &'a NonAnchorIdl, args: &'a Args) -> Self {
         // 分析字段分配，排除被其他模块使用的类型
         let field_allocation = FieldAllocationAnalyzer::analyze_non_anchor_idl(idl);
-        Self { idl, args, field_allocation }
+        Self { 
+            idl, 
+            args, 
+            field_allocation,
+            naming_converter: RefCell::new(NamingConverter::new()),
+        }
+    }
+
+    /// 使用NamingConverter转换字段名并生成serde属性
+    fn convert_field_name_with_serde(&self, original_name: &str) -> (String, TokenStream) {
+        let snake_field_name = self.naming_converter.borrow_mut().convert_field_name(original_name);
+        let serde_attr = if snake_field_name != original_name {
+            quote! { #[cfg_attr(feature = "serde", serde(rename = #original_name))] }
+        } else { 
+            quote! {} 
+        };
+        (snake_field_name, serde_attr)
     }
 }
 
@@ -59,7 +77,7 @@ impl<'a> TypesTemplateGenerator for NonAnchorTypesTemplate<'a> {
             match &r#type.type_def {
                 crate::idl_format::non_anchor_idl::NonAnchorTypeKind::Struct { fields } => {
                         let struct_fields = fields.iter().map(|field| {
-                            let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                            let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                             let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                             let field_type = self.convert_idl_type_to_rust(&field.field_type);
                             let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -80,7 +98,7 @@ impl<'a> TypesTemplateGenerator for NonAnchorTypesTemplate<'a> {
                         });
 
                         let default_field_values = fields.iter().map(|field| {
-                            let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                            let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                             let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                             let default_value = self.generate_field_default_from_type(&field.field_type);
                             quote! { #field_name: #default_value }
@@ -428,7 +446,7 @@ impl<'a> NonAnchorTypesTemplate<'a> {
         let type_definition = match &type_def.type_def {
             crate::idl_format::non_anchor_idl::NonAnchorTypeKind::Struct { fields } => {
                 let field_tokens = fields.iter().map(|field| {
-                        let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                        let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                         let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                         let field_type = self.convert_idl_type_to_rust(&field.field_type);
                         let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -449,7 +467,7 @@ impl<'a> NonAnchorTypesTemplate<'a> {
                     });
 
                     let default_fields = fields.iter().map(|field| {
-                        let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                        let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                         let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                         let default_value = self.generate_field_default_from_type(&field.field_type);
                         quote! { #field_name: #default_value, }

@@ -3,7 +3,6 @@
 //! 提供细分化的Solana依赖管理，完全移除对solana-program的依赖
 //! 使用pubkey!宏替代declare_id!宏
 
-use std::collections::HashMap;
 use serde::Serialize;
 use toml::{map::Map, Value};
 
@@ -323,4 +322,33 @@ mod tests {
         // 验证包含bytemuck依赖
         assert!(toml_content.contains("bytemuck"));
     }
+}
+
+/// 为workspace成员生成Cargo.toml
+pub fn write_workspace_member_cargo_toml(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
+    use crate::workspace::generate_member_cargo_toml;
+    use crate::write_src::get_program_id;
+    use std::fs;
+
+    let program_id = get_program_id(args, idl);
+    
+    let cargo_toml_content = generate_member_cargo_toml(
+        &args.output_crate_name,
+        &program_id,
+        args.generate_parser,
+        args.test,
+        &args.zero_copy,
+    );
+
+    let cargo_toml_path = args.output_dir.join("Cargo.toml");
+    fs::write(&cargo_toml_path, cargo_toml_content)?;
+
+    log::info!("✅ Generated workspace member Cargo.toml for: {}", args.output_crate_name);
+    Ok(())
+}
+
+/// 检查是否为workspace模式（通过环境或参数判断）
+pub fn should_use_workspace_cargo_toml(args: &Args) -> bool {
+    // 如果workspace标志为真且在批量模式下
+    args.workspace && args.batch
 }

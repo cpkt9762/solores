@@ -8,6 +8,7 @@
 Solores 模块函数一致性检查脚本
 
 检查生成的代码中每个模块的成员函数必须存在且必须一致，确保所有生成的代码具有统一的函数接口。
+包括检查 Keys 结构体的 to_vec() 方法，用于将账户列表转换为 Vec<Pubkey>。
 
 用法:
     python validate_module_functions.py --project path/to/generated/project
@@ -88,7 +89,7 @@ class FunctionSignatureParser:
         self.impl_pattern = re.compile(r'impl\s+(\w+)')
         self.impl_default_pattern = re.compile(r'impl\s+Default\s+for\s+(\w+)')
         self.impl_from_pattern = re.compile(r'impl\s+From<[^>]+>\s+for\s+(\w+)')
-        self.function_pattern = re.compile(r'pub\s+fn\s+(\w+)\s*\([^)]*\)\s*(?:->\s*([^{]+))?', re.MULTILINE)
+        self.function_pattern = re.compile(r'pub\s+fn\s+(\w+)\s*\([^)]*\)\s*(?:->\s*([^{]+?))?(?:\s*\{)', re.MULTILINE | re.DOTALL)
         self.const_pattern = re.compile(r'pub\s+const\s+(\w+):\s*([^=]+)=')
         self.struct_pattern = re.compile(r'pub\s+struct\s+(\w+)')
         self.enum_pattern = re.compile(r'pub\s+enum\s+(\w+)')
@@ -230,6 +231,23 @@ class FunctionSignatureParser:
     
     def _parse_global_definitions(self, content: str, structs: Set[str], functions: Dict[str, FunctionSignature], constants: Set[str]):
         """解析全局定义"""
+        # 首先处理整个内容的函数（支持跨多行）
+        func_matches = self.function_pattern.findall(content)
+        for func_name, return_type in func_matches:
+            if not return_type:
+                return_type = "()"
+            return_type = return_type.strip()
+            
+            signature = FunctionSignature(
+                name=func_name,
+                return_type=return_type,
+                parameters=[],
+                is_impl=False,
+                struct_name=""
+            )
+            functions[func_name] = signature
+        
+        # 然后按行处理其他定义
         lines = content.split('\n')
         
         for line in lines:
@@ -252,21 +270,6 @@ class FunctionSignatureParser:
             if const_match:
                 constants.add(const_match.group(1))
                 continue
-                
-            # 全局函数 (少见)
-            func_match = self.function_pattern.search(line)
-            if func_match:
-                func_name = func_match.group(1)
-                return_type = func_match.group(2).strip() if func_match.group(2) else "()"
-                
-                signature = FunctionSignature(
-                    name=func_name,
-                    return_type=return_type,
-                    parameters=[],
-                    is_impl=False,
-                    struct_name=""
-                )
-                functions[func_name] = signature
                 
     def _parse_impl_block(self, content: str, struct_name: str, functions: Dict[str, FunctionSignature]):
         """解析impl块内的函数"""
@@ -330,12 +333,23 @@ class InstructionsFunctionValidator:
                     if not self._check_return_type_compatible(func.return_type, expected_return):
                         warnings.append(f"{struct_name}::{func_name} 返回类型不一致: 期望 {expected_return}, 实际 {func.return_type}")
         
-        # 检查Keys结构体函数 (账户密钥结构体) - 只需要from函数
+        # 检查Keys结构体函数 (账户密钥结构体) - 需要from函数和to_vec方法
         keys_structs = [s for s in self.module_info.structs if s.endswith('Keys')]
         for struct_name in keys_structs:
+            # 检查From trait实现
             key = f"{struct_name}::from"
             if key not in self.module_info.functions:
                 errors.append(f"{struct_name} 缺少From trait实现")
+            
+            # 检查to_vec方法
+            to_vec_key = f"{struct_name}::to_vec"
+            if to_vec_key not in self.module_info.functions:
+                errors.append(f"{struct_name} 缺少to_vec()方法")
+            else:
+                # 验证返回类型
+                func = self.module_info.functions[to_vec_key]
+                if not self._check_to_vec_return_type(func.return_type):
+                    warnings.append(f"{struct_name}::to_vec 返回类型不正确: 期望 Vec<Pubkey>, 实际 {func.return_type}")
         
         # 检查discriminator常量
         discm_constants = [c for c in self.module_info.constants if c.endswith('_IX_DISCM')]
@@ -369,6 +383,11 @@ class InstructionsFunctionValidator:
             return 'Self' in actual or actual.endswith('Error>')
             
         return actual == expected or actual.replace(' ', '') == expected.replace(' ', '')
+    
+    def _check_to_vec_return_type(self, return_type: str) -> bool:
+        """检查to_vec返回类型是否为Vec<Pubkey>"""
+        normalized = return_type.strip().replace(' ', '')
+        return normalized == 'Vec<Pubkey>' or normalized == 'Vec<solana_pubkey::Pubkey>'
 
 class AccountsFunctionValidator:
     """Accounts模块函数验证器"""
@@ -480,9 +499,10 @@ class EventsFunctionValidator:
 class ParsersFunctionValidator:
     """Parsers模块函数验证器"""
     
-    def __init__(self, module_info: ModuleInfo, has_accounts: bool):
+    def __init__(self, module_info: ModuleInfo, has_accounts: bool, program_name: str = ""):
         self.module_info = module_info
         self.has_accounts = has_accounts
+        self.program_name = program_name
         
     def validate(self) -> ValidationResult:
         """验证Parsers模块"""
@@ -504,23 +524,46 @@ class ParsersFunctionValidator:
             if func_name not in self.module_info.functions:
                 errors.append(f"缺少函数 {func_name}()")
         
-        # 检查必需枚举
-        required_enums = ['ProgramInstruction']
+        # 检查必需枚举 - 支持带项目名前缀的命名
+        # 转换程序名称为PascalCase
+        program_pascal = self._to_pascal_case(self.program_name)
+        
+        required_enums = [
+            'ProgramInstruction',
+            f'{program_pascal}Instruction'
+        ]
         if self.has_accounts:
-            required_enums.append('ProgramAccount')
-            
-        for enum_name in required_enums:
-            if enum_name not in self.module_info.structs:
-                if enum_name == 'ProgramAccount' and not self.has_accounts:
-                    continue  # 无accounts时不需要ProgramAccount枚举
-                errors.append(f"缺少枚举 {enum_name}")
+            required_enums.extend([
+                'ProgramAccount',
+                f'{program_pascal}Account'
+            ])
+        
+        # 检查是否至少有一个变体存在
+        instruction_enum_found = False
+        for enum_name in ['ProgramInstruction', f'{program_pascal}Instruction']:
+            if enum_name in self.module_info.structs:
+                instruction_enum_found = True
+                break
+        
+        if not instruction_enum_found:
+            errors.append(f"缺少枚举 ProgramInstruction 或 {program_pascal}Instruction")
+        
+        if self.has_accounts:
+            account_enum_found = False
+            for enum_name in ['ProgramAccount', f'{program_pascal}Account']:
+                if enum_name in self.module_info.structs:
+                    account_enum_found = True
+                    break
+            if not account_enum_found:
+                errors.append(f"缺少枚举 ProgramAccount 或 {program_pascal}Account")
         
         # 检查条件性生成
         if not self.has_accounts:
             if 'try_unpack_account' in self.module_info.functions:
                 errors.append("NonAnchor IDL无accounts时不应生成try_unpack_account函数")
-            if 'ProgramAccount' in self.module_info.structs:
-                errors.append("NonAnchor IDL无accounts时不应生成ProgramAccount枚举")
+            for enum_name in ['ProgramAccount', f'{program_pascal}Account']:
+                if enum_name in self.module_info.structs:
+                    errors.append(f"NonAnchor IDL无accounts时不应生成{enum_name}枚举")
             
         success = len(errors) == 0
         message = f"Parsers模块验证: {'通过' if success else '失败'}"
@@ -532,6 +575,18 @@ class ParsersFunctionValidator:
             details.extend([f"警告: {w}" for w in warnings])
             
         return ValidationResult(success, message, details)
+    
+    def _to_pascal_case(self, name: str) -> str:
+        """将字符串转换为PascalCase"""
+        if not name:
+            return ""
+        
+        # 移除非字母数字字符，分割单词
+        import re
+        words = re.findall(r'[a-zA-Z0-9]+', name)
+        
+        # 转换为PascalCase
+        return ''.join(word.capitalize() for word in words)
 
 class CrossModuleFunctionValidator:
     """跨模块函数一致性验证器"""
@@ -556,6 +611,9 @@ class CrossModuleFunctionValidator:
                         if struct_name not in key_structs:
                             key_structs[struct_name] = []
                         key_structs[struct_name].append((module_name, module_info))
+                    elif self._is_parser_enum(struct_name):
+                        # Parser枚举不需要序列化函数，跳过
+                        continue
                     else:
                         # 数据结构体需要完整的序列化接口
                         if struct_name not in data_structs:
@@ -581,12 +639,17 @@ class CrossModuleFunctionValidator:
                 if f"{struct_name}::default" not in module_info.functions:
                     missing_default.append(f"{module_name}::{struct_name}")
         
-        # 检查Keys结构体的From trait实现
+        # 检查Keys结构体的From trait实现和to_vec方法
         missing_from_trait = []
+        missing_to_vec = []
         for struct_name, module_list in key_structs.items():
             for module_name, module_info in module_list:
                 if f"{struct_name}::from" not in module_info.functions:
                     missing_from_trait.append(f"{module_name}::{struct_name}")
+                
+                # 检查to_vec方法
+                if f"{struct_name}::to_vec" not in module_info.functions:
+                    missing_to_vec.append(f"{module_name}::{struct_name}")
         
         # 报告错误
         if missing_try_to_vec:
@@ -600,6 +663,10 @@ class CrossModuleFunctionValidator:
         if missing_from_trait:
             errors.append(f"Keys结构体缺少From trait实现: {', '.join(missing_from_trait[:3])}" +
                          (f" 等{len(missing_from_trait)}个" if len(missing_from_trait) > 3 else ""))
+        
+        if missing_to_vec:
+            errors.append(f"Keys结构体缺少to_vec()方法: {', '.join(missing_to_vec[:3])}" +
+                         (f" 等{len(missing_to_vec)}个" if len(missing_to_vec) > 3 else ""))
         
         if missing_default:
             warnings.append(f"缺少Default实现的结构体: {', '.join(missing_default[:3])}" +
@@ -619,6 +686,17 @@ class CrossModuleFunctionValidator:
         details.append(f"Keys结构体总数: {sum(len(v) for v in key_structs.values())}")
             
         return ValidationResult(success, message, details)
+    
+    def _is_parser_enum(self, struct_name: str) -> bool:
+        """判断是否为parser枚举类型"""
+        # Parser枚举通常以这些模式命名：
+        # ProgramInstruction, ProgramAccount, {ProjectName}Instruction, {ProjectName}Account
+        return (
+            struct_name == 'ProgramInstruction' or
+            struct_name == 'ProgramAccount' or
+            struct_name.endswith('Instruction') or
+            struct_name.endswith('Account')
+        )
 
 class SoloresModuleFunctionValidator:
     """Solores模块函数验证器主类"""
@@ -742,7 +820,8 @@ class SoloresModuleFunctionValidator:
         
         # 验证Parsers模块
         if 'parsers' in self.modules:
-            validator = ParsersFunctionValidator(self.modules['parsers'], self.idl_info['has_accounts'])
+            program_name = self.idl_info.get('program_name', '')
+            validator = ParsersFunctionValidator(self.modules['parsers'], self.idl_info['has_accounts'], program_name)
             results['parsers'] = validator.validate()
         
         # 跨模块一致性验证

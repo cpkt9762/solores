@@ -9,18 +9,34 @@ use heck::ToShoutySnakeCase;
 
 use crate::idl_format::non_anchor_idl::NonAnchorIdl;
 use crate::templates::{TemplateGenerator, EventsTemplateGenerator};
-use crate::templates::common::{doc_generator::DocGenerator};
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
+use crate::utils::{generate_pubkey_serde_attr};
+use std::cell::RefCell;
 
 /// 非 Anchor Events 模板
 pub struct NonAnchorEventsTemplate<'a> {
     pub idl: &'a NonAnchorIdl,
+    naming_converter: RefCell<NamingConverter>,
 }
 
 impl<'a> NonAnchorEventsTemplate<'a> {
     /// 创建新的非 Anchor Events 模板
     pub fn new(idl: &'a NonAnchorIdl) -> Self {
-        Self { idl }
+        Self { 
+            idl,
+            naming_converter: RefCell::new(NamingConverter::new()),
+        }
+    }
+
+    /// 使用NamingConverter转换字段名并生成serde属性
+    fn convert_field_name_with_serde(&self, original_name: &str) -> (String, TokenStream) {
+        let snake_field_name = self.naming_converter.borrow_mut().convert_field_name(original_name);
+        let serde_attr = if snake_field_name != original_name {
+            quote! { #[cfg_attr(feature = "serde", serde(rename = #original_name))] }
+        } else { 
+            quote! {} 
+        };
+        (snake_field_name, serde_attr)
     }
 
     /// 检查字段类型是否为 Pubkey
@@ -56,7 +72,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             let struct_fields = if let Some(event_fields) = &event.fields {
                 // 优先级1：直接使用event.fields
                 let field_tokens = event_fields.iter().map(|field| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -79,7 +95,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
                 // 优先级2：从字段分配获取字段
                 let field_tokens = allocated_fields.iter().map(|field_def| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     // 使用改进的类型转换逻辑
                     let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
@@ -309,7 +325,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
         let (event_fields, default_fields) = if let Some(fields) = &event.fields {
             // 优先级1：直接使用event.fields
             let fields_tokens = fields.iter().map(|field| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = self.convert_event_field_type(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -329,7 +345,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 }
             });
             let default_values = fields.iter().map(|field| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
@@ -340,7 +356,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 优先级2：从字段分配获取字段
             let fields_tokens = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 // 使用改进的类型转换逻辑
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
@@ -365,7 +381,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
                 }
             });
             let default_values = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });

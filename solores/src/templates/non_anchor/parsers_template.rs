@@ -238,24 +238,46 @@ impl<'a> TemplateGenerator for NonAnchorParsersTemplate<'a> {
 
     fn gen_files(&self) -> Vec<(String, TokenStream)> {
         let instructions_parser = self.generate_instructions_parser();
-        let accounts_parser = self.generate_accounts_parser();
         
-        vec![
+        // 检查是否存在顶级accounts字段，只有存在时才生成accounts.rs
+        let has_accounts = self.idl.accounts.as_ref().map_or(false, |accounts| !accounts.is_empty());
+        
+        let mut files = vec![
             ("instructions.rs".to_string(), instructions_parser),
-            ("accounts.rs".to_string(), accounts_parser),
-        ]
+        ];
+        
+        if has_accounts {
+            let accounts_parser = self.generate_accounts_parser();
+            files.push(("accounts.rs".to_string(), accounts_parser));
+        }
+        
+        files
     }
 
     fn gen_mod_file(&self) -> TokenStream {
-        quote! {
-            //! Non-Anchor parser module
-            //! Generated parsers for instructions and accounts with 1-byte discriminator and length-based identification
-            
-            pub mod instructions;
-            pub mod accounts;
-            
-            pub use instructions::*;
-            pub use accounts::*;
+        // 检查是否存在顶级accounts字段，只有存在时才生成accounts模块声明和导入
+        let has_accounts = self.idl.accounts.as_ref().map_or(false, |accounts| !accounts.is_empty());
+        
+        if has_accounts {
+            quote! {
+                //! Non-Anchor parser module
+                //! Generated parsers for instructions and accounts with 1-byte discriminator and length-based identification
+                
+                pub mod instructions;
+                pub mod accounts;
+                
+                pub use instructions::*;
+                pub use accounts::*;
+            }
+        } else {
+            quote! {
+                //! Non-Anchor parser module
+                //! Generated parsers for instructions with 1-byte discriminator
+                
+                pub mod instructions;
+                
+                pub use instructions::*;
+            }
         }
     }
 }

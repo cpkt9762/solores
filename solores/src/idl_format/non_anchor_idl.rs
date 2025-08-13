@@ -476,7 +476,7 @@ impl NonAnchorFieldType {
         // 递归深度监控
         let depth = NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         
-        if depth > 100 {
+        if depth > 500 {
             NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("NonAnchorFieldType recursion too deep: {}", depth));
         }
@@ -736,10 +736,14 @@ impl NonAnchorIdl {
                     })
             });
         
-        // 获取address字段（必需）
-        let address = obj.get("address")
+        // 获取address字段（优先从metadata.address获取，其次从顶级address）
+        let address = obj.get("metadata")
+            .and_then(|m| m.as_object())
+            .and_then(|m| m.get("address"))
             .and_then(|v| v.as_str())
+            .or_else(|| obj.get("address").and_then(|v| v.as_str()))
             .ok_or_else(|| {
+                log::debug!("❌ NonAnchor IDL缺少address字段（在metadata.address或顶级address）");
                 serde_json::Error::custom("Missing required field: address")
             })?
             .to_string();

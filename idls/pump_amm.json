@@ -1,10 +1,14 @@
 {
-  "address": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
   "metadata": {
     "name": "pump_amm",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "address": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+    "description": "Pump AMM - Automated market maker protocol with pump-style tokenomics and trading mechanisms",
+    "origin": "anchor",
+    "repository": "https://github.com/pump-protocol/pump-amm",
+    "documentation": "https://docs.pump.fun/",
+    "category": "defi"
   },
   "instructions": [
     {

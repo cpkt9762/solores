@@ -1,10 +1,14 @@
 {
-  "address": "EewxydAPCCVuNEyrVN68PuSYdQ7wKn27V9Gjeoi8dy3S",
   "metadata": {
     "name": "lifinity",
     "version": "0.1.1",
     "spec": "0.1.0",
-    "description": "Lifinity Proactive Market Maker with concentrated liquidity and dynamic fees - Created with Anchor"
+    "address": "EewxydAPCCVuNEyrVN68PuSYdQ7wKn27V9Gjeoi8dy3S",
+    "description": "Lifinity - Proactive market maker with concentrated liquidity and dynamic fee optimization",
+    "origin": "anchor",
+    "repository": "https://github.com/lifinity-protocol/lifinity",
+    "documentation": "https://docs.lifinity.io/",
+    "category": "defi"
   },
   "version": "0.1.1",
   "name": "lifinity",

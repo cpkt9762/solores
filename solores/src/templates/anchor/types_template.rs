@@ -11,15 +11,17 @@ use sha2::{Digest, Sha256};
 use crate::idl_format::anchor_idl::AnchorIdl;
 use crate::Args;
 use crate::templates::{TemplateGenerator, TypesTemplateGenerator};
-use crate::templates::common::{doc_generator::DocGenerator};
+use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
 use crate::templates::field_analyzer::{FieldAllocationAnalyzer, FieldAllocationMap};
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::utils::{generate_pubkey_serde_attr};
+use std::cell::RefCell;
 
 /// Anchor Types 模板
 pub struct AnchorTypesTemplate<'a> {
     pub idl: &'a AnchorIdl,
     pub args: &'a Args,
     pub field_allocation: FieldAllocationMap,
+    naming_converter: RefCell<NamingConverter>,
 }
 
 impl<'a> AnchorTypesTemplate<'a> {
@@ -29,7 +31,23 @@ impl<'a> AnchorTypesTemplate<'a> {
         log::debug!("🏭 创建Anchor Types模板，开始字段分配分析");
         let field_allocation = FieldAllocationAnalyzer::analyze_anchor_idl(idl);
         log::debug!("✅ Anchor Types模板字段分配分析完成");
-        Self { idl, args, field_allocation }
+        Self { 
+            idl, 
+            args, 
+            field_allocation,
+            naming_converter: RefCell::new(NamingConverter::new()),
+        }
+    }
+
+    /// 使用NamingConverter转换字段名并生成serde属性
+    fn convert_field_name_with_serde(&self, original_name: &str) -> (String, TokenStream) {
+        let snake_field_name = self.naming_converter.borrow_mut().convert_field_name(original_name);
+        let serde_attr = if snake_field_name != original_name {
+            quote! { #[cfg_attr(feature = "serde", serde(rename = #original_name))] }
+        } else { 
+            quote! {} 
+        };
+        (snake_field_name, serde_attr)
     }
 
     /// 生成类型常量 - 只为剩余的（未被其他模块使用的）类型生成
@@ -105,7 +123,7 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
                 match type_kind {
                     crate::idl_format::anchor_idl::AnchorTypeKind::Struct(struct_def) => {
                         let struct_fields = struct_def.iter().map(|field| {
-                            let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                            let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                             let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                             let field_type = self.convert_idl_type_to_rust(&field.field_type);
                             let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -294,7 +312,7 @@ impl<'a> AnchorTypesTemplate<'a> {
             match type_kind {
             crate::idl_format::anchor_idl::AnchorTypeKind::Struct(struct_def) => {
                 let fields = struct_def.iter().map(|field| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = self.convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -316,7 +334,7 @@ impl<'a> AnchorTypesTemplate<'a> {
 
                 // Generate Default implementation for struct
                 let default_assignments = struct_def.iter().map(|field| {
-                    let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = self.generate_default_value_for_field_type(&field.field_type);
                     quote! { #field_name: #default_value, }

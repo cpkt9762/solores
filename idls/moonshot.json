@@ -1,10 +1,14 @@
 {
-  "address": "MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG",
   "metadata": {
     "name": "moonshot",
     "version": "1.0.0",
     "spec": "0.1.0",
-    "description": "Moonshot token launchpad with bonding curve and liquidity migration - Created with Anchor"
+    "address": "MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG",
+    "description": "Moonshot - Token launchpad with bonding curve mechanics and automated liquidity migration",
+    "origin": "anchor",
+    "repository": "https://github.com/moonshot-protocol/moonshot",
+    "documentation": "https://docs.moonshot.cc/",
+    "category": "launchpad"
   },
   "version": "0.1.0",
   "name": "moonshot",

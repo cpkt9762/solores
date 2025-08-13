@@ -1,10 +1,14 @@
 {
-  "address": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
   "metadata": {
     "name": "raydium_launchpad",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "address": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+    "description": "Raydium Launchpad - Token launch platform with automated liquidity provision",
+    "origin": "anchor",
+    "repository": "https://github.com/raydium-io/raydium-launchpad",
+    "documentation": "https://docs.raydium.io/",
+    "category": "launchpad"
   },
   "instructions": [
     {

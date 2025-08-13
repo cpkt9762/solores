@@ -204,7 +204,7 @@ pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<()
 }
 
 /// 获取程序ID
-fn get_program_id<'a>(args: &'a Args, idl: &'a dyn IdlFormat) -> &'a str {
+pub fn get_program_id<'a>(args: &'a Args, idl: &'a dyn IdlFormat) -> &'a str {
     let user_provided_id_opt =
         args.program_id
             .as_ref()

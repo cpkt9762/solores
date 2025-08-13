@@ -6,23 +6,36 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use convert_case::{Case, Casing};
 use heck::ToShoutySnakeCase;
-use sha2::{Digest};
 
-use crate::idl_format::anchor_idl::Event;
-use crate::idl_format::anchor_idl::AnchorType;
 use crate::templates::{TemplateGenerator, EventsTemplateGenerator};
-use crate::templates::common::{doc_generator::DocGenerator};
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
+use crate::utils::{generate_pubkey_serde_attr};
+use std::cell::RefCell;
 
 /// Anchor Events 模板
 pub struct AnchorEventsTemplate<'a> {
     pub idl: &'a crate::idl_format::anchor_idl::AnchorIdl,
+    naming_converter: RefCell<NamingConverter>,
 }
 
 impl<'a> AnchorEventsTemplate<'a> {
     /// 创建 Anchor Events 模板（统一使用字段分配机制）
     pub fn new(idl: &'a crate::idl_format::anchor_idl::AnchorIdl) -> Self {
-        Self { idl }
+        Self { 
+            idl,
+            naming_converter: RefCell::new(NamingConverter::new()),
+        }
+    }
+
+    /// 使用NamingConverter转换字段名并生成serde属性
+    fn convert_field_name_with_serde(&self, original_name: &str) -> (String, TokenStream) {
+        let snake_field_name = self.naming_converter.borrow_mut().convert_field_name(original_name);
+        let serde_attr = if snake_field_name != original_name {
+            quote! { #[cfg_attr(feature = "serde", serde(rename = #original_name))] }
+        } else { 
+            quote! {} 
+        };
+        (snake_field_name, serde_attr)
     }
 
     /// 生成事件结构体
@@ -46,7 +59,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                 log::debug!("🎭 Events: Event '{}' 有直接字段定义，使用直接字段", event.name);
                 let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                 let struct_fields = event_fields.iter().map(|field| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -84,7 +97,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                         allocated_fields.iter().map(|f| &f.name).collect::<Vec<_>>());
                     let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                     let struct_fields = allocated_fields.iter().map(|field_def| {
-                        let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                        let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                         let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                         // 使用改进的类型转换逻辑
                         let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
@@ -403,7 +416,7 @@ impl<'a> AnchorEventsTemplate<'a> {
         let event_fields = if let Some(fields) = &event.fields {
             // 路径1: 事件有直接字段定义
             let fields_tokens = fields.iter().map(|field| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = self.convert_event_field_type(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -429,7 +442,7 @@ impl<'a> AnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 路径2: 从字段分配获取字段
             let struct_fields = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 // 使用改进的类型转换逻辑
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
@@ -467,7 +480,7 @@ impl<'a> AnchorEventsTemplate<'a> {
         let default_fields = if let Some(fields) = &event.fields {
             // 路径1: 事件有直接字段定义
             let default_values = fields.iter().map(|field| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
@@ -478,7 +491,7 @@ impl<'a> AnchorEventsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
             // 路径2: 从字段分配获取字段的默认值
             let default_values = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 quote! { #field_name: Default::default(), }
             });
@@ -549,8 +562,10 @@ impl<'a> AnchorEventsTemplate<'a> {
                 quote! { #type_ident }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => {
-                let type_ident = syn::Ident::new(type_name, proc_macro2::Span::call_site());
-                quote! { #type_ident }
+                // 使用完整路径引用types模块中的类型
+                let type_path = format!("crate::types::{}", type_name);
+                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
+                quote! { #type_path }
             },
             crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, size) => {
                 let inner_type_token = self.convert_event_field_type(inner_type);

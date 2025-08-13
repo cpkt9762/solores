@@ -1,10 +1,14 @@
 {
-  "address": "boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4",
   "metadata": {
     "name": "boop",
     "version": "0.2.0",
     "spec": "0.1.0",
-    "description": "Boop is a token launcher with fee sharing  - Created with Anchor"
+    "address": "boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4",
+    "description": "Boop - Token launcher with fee sharing and community-driven launches",
+    "origin": "anchor",
+    "repository": "https://github.com/boop-protocol/boop",
+    "documentation": "https://docs.boop.io/",
+    "category": "launchpad"
   },
   "instructions": [
     {

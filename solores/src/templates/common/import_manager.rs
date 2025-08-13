@@ -6,33 +6,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::{HashMap, HashSet};
 
-/// 检查代码中是否包含自定义类型（驼峰命名且以大写字母开头）
-fn has_custom_types_in_code(code_content: &str) -> bool {
-    // 常见的自定义类型名模式检测
-    let custom_type_patterns = [
-        "Params", "Config", "Event", "Info", "Schedule", "Direction", 
-        "Status", "Curve", "Platform", "Mint", "Vesting", "Trade", "Pool"
-    ];
-    
-    for pattern in &custom_type_patterns {
-        if code_content.contains(pattern) {
-            return true;
-        }
-    }
-    
-    // 检查驼峰命名类型（以大写字母开头后跟小写字母）
-    for word in code_content.split_whitespace() {
-        let word = word.trim_end_matches(|c: char| c.is_ascii_punctuation());
-        if word.len() > 3 && 
-           word.chars().next().unwrap().is_ascii_uppercase() &&
-           word.chars().nth(1).unwrap().is_ascii_lowercase() &&
-           word.chars().any(|c| c.is_ascii_uppercase()) {
-            return true;
-        }
-    }
-    
-    false
-}
 
 /// 导入类型分类
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -127,7 +100,7 @@ impl ImportManager {
                     ),
                     SolanaImport::Instruction => (
                         "instruction".to_string(),
-                        "use solana_instruction::{AccountMeta, Instruction};".to_string(),
+                        "".to_string(), // 不生成导入，使用绝对路径
                     ),
                     SolanaImport::ProgramResult => (
                         "program_result".to_string(),
@@ -498,7 +471,7 @@ impl ImportManager {
     /// 使用完整路径策略：只导入基础类型（borsh, Pubkey），其他类型使用完整路径
     pub fn generate_optimized_instruction_imports_for_code_with_types_check(
         code_content: &str, 
-        has_types_module: bool
+        _has_types_module: bool
     ) -> TokenStream {
         log::debug!("🔧 生成完整路径优化导入，代码长度: {}", code_content.len());
         
@@ -513,9 +486,8 @@ impl ImportManager {
             log::debug!("✅ 添加Pubkey短路径导入");
         }
         
-        // 移除AccountMeta和Instruction的导入，改用完整路径
-        // 不再添加 solana_instruction 导入，代码中直接使用 solana_instruction::AccountMeta 等
-        log::debug!("🚫 跳过solana_instruction导入 - 使用完整路径");
+        // 不再自动添加AccountMeta和Instruction的导入 - 已使用绝对路径
+        log::debug!("🚫 跳过AccountMeta和Instruction导入 - 使用绝对路径 solana_program::instruction::");
         
         // 不再自动添加types通配符导入，代码中已使用完整路径 crate::types::
         log::debug!("🚫 跳过types通配符导入 - 使用完整路径 crate::types::");
@@ -540,12 +512,11 @@ impl ImportManager {
         }
     }
 
-    /// 生成针对指令文件的优化导入（包含指令文件必需的所有类型）
+    /// 生成针对指令文件的优化导入（使用绝对路径，不需要导入）
     pub fn generate_optimized_instruction_imports() -> TokenStream {
         quote! {
+            #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
-            use solana_instruction::{AccountMeta, Instruction};
-            use crate::types::*;
         }
     }
 
@@ -596,7 +567,7 @@ impl ImportManager {
         // 避免自引用types模块
         if code_content.contains("crate::types::") && !code_content.contains("use crate::types::*;") {
             // Types模块通常不需要自引用除非有嵌套类型
-            let has_nested_types = code_content.matches("crate::types::").count() > 1;
+            let _has_nested_types = code_content.matches("crate::types::").count() > 1;
             // 不再自动添加types通配符导入，使用完整路径
         }
         
@@ -640,8 +611,8 @@ impl ImportManager {
     }
 
     /// 生成错误模块智能导入（基于代码内容）
-    pub fn generate_smart_error_imports(code_content: &str) -> TokenStream {
-        let mut imports = Vec::new();
+    pub fn generate_smart_error_imports(_code_content: &str) -> TokenStream {
+        let imports = Vec::new();
         
         // 移除 ProgramError 导入，代码中使用 solana_program_error::ProgramError 完整路径
         

@@ -1,10 +1,14 @@
 {
-    "address": "SSwpkEEcbUqx4vtoEByFjSkhKdCT862DNVb52nZg1UZ",
     "metadata": {
         "name": "saros",
         "version": "0.1.0",
         "spec": "0.1.0",
-        "description": "Saros cross-chain AMM with bridge integration"
+        "address": "SSwpkEEcbUqx4vtoEByFjSkhKdCT862DNVb52nZg1UZ",
+        "description": "Saros - Cross-chain automated market maker with bridge integration and multi-chain liquidity",
+        "origin": "non-anchor",
+        "repository": "https://github.com/saros-protocol/saros",
+        "documentation": "https://docs.saros.finance/",
+        "category": "defi"
     },
     "version": "0.1.0",
     "name": "saros",

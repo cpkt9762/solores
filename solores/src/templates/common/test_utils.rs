@@ -119,7 +119,7 @@ impl TestUtils {
         expected_variant: &Ident,
         keys_struct_name: &Ident,
         accounts_len_const: &Ident,
-        args_struct_name: &Ident,
+        _args_struct_name: &Ident,
     ) -> TokenStream {
         quote! {
             match parse_instruction(&test_data, &mock_accounts) {

@@ -1,13 +1,15 @@
 
 {
-  "address": "PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY",
   "metadata": {
     "name": "phoenix",
     "version": "0.2.4",
     "spec": "0.1.0",
-    "description": "Phoenix high-performance central limit order book with advanced trading features",
+    "address": "PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY",
+    "description": "Phoenix - High-performance central limit order book with advanced trading features",
     "origin": "shank",
-    "address": "PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY"
+    "repository": "https://github.com/ellipsis-labs/phoenix",
+    "documentation": "https://docs.phoenix.trade/",
+    "category": "trading"
   },
   "version": "0.2.4",
   "name": "phoenix",

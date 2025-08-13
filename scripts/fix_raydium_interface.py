@@ -287,6 +287,42 @@ class RaydiumInterfaceFixer:
             replacement7 = 'accounts: metas,'
             content = re.sub(pattern7, replacement7, content)
             
+            # 7. 替换to_vec方法实现（处理Option<Pubkey>）
+            to_vec_pattern = r'/// Convert Keys to Vec<Pubkey>\s*\n\s*pub fn to_vec\(&self\) -> Vec<Pubkey> \{\s*\n\s*vec!\[\s*\n([\s\S]*?)\s*\]\s*\n\s*\}'
+            to_vec_replacement = '''/// Convert Keys to Vec<Pubkey>
+    pub fn to_vec(&self) -> Vec<Pubkey> {
+        let mut vec = vec![
+            self.token_program,
+            self.amm,
+            self.amm_authority,
+            self.amm_open_orders,
+        ];
+        
+        // 条件性添加amm_target_orders
+        if let Some(amm_target_orders) = self.amm_target_orders {
+            vec.push(amm_target_orders);
+        }
+        
+        vec.extend_from_slice(&[
+            self.pool_coin_token_account,
+            self.pool_pc_token_account,
+            self.serum_program,
+            self.serum_market,
+            self.serum_bids,
+            self.serum_asks,
+            self.serum_event_queue,
+            self.serum_coin_vault_account,
+            self.serum_pc_vault_account,
+            self.serum_vault_signer,
+            self.uer_source_token_account,
+            self.uer_destination_token_account,
+            self.user_source_owner,
+        ]);
+        
+        vec
+    }'''
+            content = re.sub(to_vec_pattern, to_vec_replacement, content, flags=re.MULTILINE)
+            
             # 检查是否有更改
             if content == original_content:
                 log_warning("SwapBaseInKeys文件没有找到需要修复的内容")
@@ -426,6 +462,42 @@ class RaydiumInterfaceFixer:
             pattern7 = r'accounts: Vec::from\(metas\),'
             replacement7 = 'accounts: metas,'
             content = re.sub(pattern7, replacement7, content)
+            
+            # 7. 替换to_vec方法实现（处理Option<Pubkey>）
+            to_vec_pattern = r'/// Convert Keys to Vec<Pubkey>\s*\n\s*pub fn to_vec\(&self\) -> Vec<Pubkey> \{\s*\n\s*vec!\[\s*\n([\s\S]*?)\s*\]\s*\n\s*\}'
+            to_vec_replacement = '''/// Convert Keys to Vec<Pubkey>
+    pub fn to_vec(&self) -> Vec<Pubkey> {
+        let mut vec = vec![
+            self.token_program,
+            self.amm,
+            self.amm_authority,
+            self.amm_open_orders,
+        ];
+        
+        // 条件性添加amm_target_orders
+        if let Some(amm_target_orders) = self.amm_target_orders {
+            vec.push(amm_target_orders);
+        }
+        
+        vec.extend_from_slice(&[
+            self.pool_coin_token_account,
+            self.pool_pc_token_account,
+            self.serum_program,
+            self.serum_market,
+            self.serum_bids,
+            self.serum_asks,
+            self.serum_event_queue,
+            self.serum_coin_vault_account,
+            self.serum_pc_vault_account,
+            self.serum_vault_signer,
+            self.uer_source_token_account,
+            self.uer_destination_token_account,
+            self.user_source_owner,
+        ]);
+        
+        vec
+    }'''
+            content = re.sub(to_vec_pattern, to_vec_replacement, content, flags=re.MULTILINE)
             
             # 检查是否有更改
             if content == original_content:

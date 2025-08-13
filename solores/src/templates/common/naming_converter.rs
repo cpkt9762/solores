@@ -119,7 +119,9 @@ impl NamingConverter {
         let smart_converted = self.smart_camel_to_snake(name);
         // 然后移除可能的前缀或后缀并清理
         let cleaned = self.clean_field_name(&smart_converted);
-        self.to_snake_case(&cleaned)
+        let snake_cased = self.to_snake_case(&cleaned);
+        // 最后检查并转义Rust关键字
+        self.escape_keyword(&snake_cased)
     }
 
     /// 智能的camelCase到snake_case转换

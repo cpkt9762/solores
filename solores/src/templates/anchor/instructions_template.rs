@@ -549,7 +549,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
         });
 
         quote! {
-            use solana_instruction::{AccountMeta, Instruction};
+            // 使用绝对路径，不需要导入
             #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
             
@@ -564,15 +564,18 @@ impl<'a> AnchorInstructionsTemplate<'a> {
     }
 
     /// 生成针对特定指令优化的导入（基于代码内容分析）
-    fn generate_optimized_imports(&self, ix: &AnchorInstruction) -> TokenStream {
-        // 生成简化的代码内容用于分析
-        let code_for_analysis = format!(
-            "BorshDeserialize BorshSerialize {} Pubkey AccountMeta Instruction try_to_vec Result std::io::Error",
-            ix.name
-        );
+    fn generate_optimized_imports(&self, _ix: &AnchorInstruction) -> TokenStream {
+        let mut import_manager = ImportManager::new();
         
-        // 基于代码内容生成智能导入
-        ImportManager::generate_optimized_instruction_imports_for_code(&code_for_analysis)
+        // 添加基础导入
+        import_manager.add_import(ImportType::Solana(SolanaImport::Pubkey));
+        import_manager.mark_as_used("solana_pubkey");
+        
+        // 添加指令相关导入
+        import_manager.add_import(ImportType::Solana(SolanaImport::Instruction));
+        import_manager.mark_as_used("instruction");
+        
+        import_manager.generate_optimized_imports()
     }
 
     /// 为单个instruction生成完整的文件内容
@@ -750,6 +753,16 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             vec![]
         };
         
+        // 生成to_vec字段列表
+        let to_vec_fields = if let Some(accounts) = &ix.accounts {
+            accounts.iter().map(|account| {
+                let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
+                quote! { self.#field_name, }
+            }).collect()
+        } else {
+            vec![]
+        };
+        
         // 生成From [Pubkey] 实现字段
         let keys_from_array_fields = if let Some(accounts) = &ix.accounts {
             accounts.iter().enumerate().map(|(i, account)| {
@@ -840,6 +853,15 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                     Self {
                         #(#keys_from_array_fields)*
                     }
+                }
+            }
+
+            impl #keys_struct_name {
+                /// Convert Keys to Vec<Pubkey>
+                pub fn to_vec(&self) -> Vec<Pubkey> {
+                    vec![
+                        #(#to_vec_fields)*
+                    ]
                 }
             }
 

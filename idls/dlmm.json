@@ -1,10 +1,14 @@
 {
-  "address": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
   "metadata": {
     "name": "lb_clmm",
     "version": "0.10.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "address": "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo",
+    "description": "Meteora DLMM - Dynamic Liquidity Market Maker with concentrated liquidity and automated fee optimization",
+    "origin": "anchor",
+    "repository": "https://github.com/meteora-protocol/dlmm-protocol",
+    "documentation": "https://docs.meteora.ag/",
+    "category": "defi"
   },
   "instructions": [
     {

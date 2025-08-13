@@ -1,12 +1,15 @@
 {
-    "address": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
     "metadata": {
         "name": "serum",
         "version": "0.0.0",
         "spec": "0.1.0",
-        "description": "Serum decentralized exchange with central limit order book",
+        "address": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        "description": "Serum - Decentralized exchange with central limit order book and high-performance trading",
         "instruction_selector_type": "serum-fork",
-        "address": "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+        "origin": "serum-fork",
+        "repository": "https://github.com/project-serum/serum-dex",
+        "documentation": "https://docs.projectserum.com/",
+        "category": "trading"
     },
     "version": "0.0.0",
     "name": "serum",

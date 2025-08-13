@@ -558,6 +558,16 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             vec![]
         };
         
+        // 生成to_vec字段列表
+        let to_vec_fields = if let Some(accounts) = &instruction.accounts {
+            accounts.iter().map(|account| {
+                let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
+                quote! { self.#field_name, }
+            }).collect()
+        } else {
+            vec![]
+        };
+        
         // 生成Into [AccountMeta] 实现字段
         let keys_into_metas_fields = if let Some(accounts) = &instruction.accounts {
             accounts.iter().map(|account| {
@@ -747,6 +757,15 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                     Self {
                         #(#keys_from_array_fields)*
                     }
+                }
+            }
+
+            impl #keys_struct_name {
+                /// Convert Keys to Vec<Pubkey>
+                pub fn to_vec(&self) -> Vec<Pubkey> {
+                    vec![
+                        #(#to_vec_fields)*
+                    ]
                 }
             }
 

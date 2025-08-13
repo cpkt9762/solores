@@ -1,10 +1,14 @@
 {
-  "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
   "metadata": {
     "name": "whirlpool",
     "version": "0.3.0",
     "spec": "0.1.0",
-    "description": "Orca Whirlpool concentrated liquidity market maker with position NFTs - Created with Anchor"
+    "address": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+    "description": "Orca Whirlpool - Concentrated liquidity market maker with position NFTs and capital efficiency",
+    "origin": "anchor",
+    "repository": "https://github.com/orca-so/whirlpools",
+    "documentation": "https://docs.orca.so/",
+    "category": "defi"
   },
   "version": "0.3.0",
   "name": "whirlpool",

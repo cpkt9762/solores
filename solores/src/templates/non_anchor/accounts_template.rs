@@ -10,19 +10,36 @@ use heck::ToShoutySnakeCase;
 use crate::idl_format::non_anchor_idl::{NonAnchorIdl, NonAnchorFieldType, NonAnchorAccount};
 use crate::Args;
 use crate::templates::TemplateGenerator;
-use crate::templates::common::{doc_generator::DocGenerator};
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
+use crate::utils::{generate_pubkey_serde_attr};
+use std::cell::RefCell;
 
 /// 非 Anchor Accounts 模板
 pub struct NonAnchorAccountsTemplate<'a> {
     pub idl: &'a NonAnchorIdl,
     pub args: &'a Args,
+    naming_converter: RefCell<NamingConverter>,
 }
 
 impl<'a> NonAnchorAccountsTemplate<'a> {
     /// 创建新的非 Anchor Accounts 模板
     pub fn new(idl: &'a NonAnchorIdl, args: &'a Args) -> Self {
-        Self { idl, args }
+        Self { 
+            idl, 
+            args,
+            naming_converter: RefCell::new(NamingConverter::new()),
+        }
+    }
+
+    /// 使用NamingConverter转换字段名并生成serde属性
+    fn convert_field_name_with_serde(&self, original_name: &str) -> (String, TokenStream) {
+        let snake_field_name = self.naming_converter.borrow_mut().convert_field_name(original_name);
+        let serde_attr = if snake_field_name != original_name {
+            quote! { #[cfg_attr(feature = "serde", serde(rename = #original_name))] }
+        } else { 
+            quote! {} 
+        };
+        (snake_field_name, serde_attr)
     }
 
     /// 检查 typedef 字段类型是否为 Pubkey
@@ -59,7 +76,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             let fields = if let Some(account_fields) = &account.fields {
                 // 优先级1：直接使用account.fields
                 let struct_fields = account_fields.iter().map(|field| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -85,7 +102,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
                 // 优先级2：从字段分配获取字段
                 let struct_fields = allocated_fields.iter().map(|field_def| {
-                    let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                    let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                     let field_docs = DocGenerator::generate_doc_comments(&Some(field_def.docs.clone()));
@@ -311,7 +328,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             let field_defaults = if let Some(account_fields) = &account.fields {
                 // 优先级1：直接使用account.fields
                 let default_values = account_fields.iter().map(|field| {
-                    let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                    let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = Self::generate_field_default_from_typedef_field_type(&field.field_type);
                     quote! { #field_name: #default_value, }
@@ -320,7 +337,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
                 // 优先级2：从字段分配获取字段
                 let default_values = allocated_fields.iter().map(|field_def| {
-                    let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                    let (snake_field_name, _) = self.convert_field_name_with_serde(&field_def.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let default_value = Self::generate_field_default_from_field_definition_type(&field_def.field_type);
                     quote! { #field_name: #default_value, }
@@ -487,7 +504,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let struct_fields = if let Some(account_fields) = &account.fields {
             // 优先级1：直接使用account.fields
             let field_tokens = account_fields.iter().map(|field| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
@@ -510,7 +527,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
             // 优先级2：从字段分配获取字段
             let field_tokens = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, serde_attr) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_field_definition_type_to_rust(&field_def.field_type);
                 let field_docs = DocGenerator::generate_doc_comments(&Some(field_def.docs.clone()));
@@ -541,7 +558,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let default_fields = if let Some(account_fields) = &account.fields {
             // 优先级1：直接使用account.fields
             let default_values = account_fields.iter().map(|field| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let default_value = Self::generate_field_default_from_typedef_field_type(&field.field_type);
                 quote! { #field_name: #default_value, }
@@ -550,7 +567,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         } else if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
             // 优先级2：从字段分配获取字段
             let default_values = allocated_fields.iter().map(|field_def| {
-                let (snake_field_name, _) = to_snake_case_with_serde(&field_def.name);
+                let (snake_field_name, _) = self.convert_field_name_with_serde(&field_def.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let default_value = Self::generate_field_default_from_field_definition_type(&field_def.field_type);
                 quote! { #field_name: #default_value, }

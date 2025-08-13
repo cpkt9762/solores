@@ -201,7 +201,7 @@ impl IdlFormat for IdlFormatEnum {
     }
 
     fn modules<'me>(&'me self, args: &'me crate::Args) -> Vec<Box<dyn IdlCodegenModule + 'me>> {
-        use crate::templates::{TemplateFactory, BoxedTemplateAdapter, ContractMode};
+        use crate::templates::{TemplateFactory, BoxedTemplateAdapter};
         
         let mut modules = Vec::new();
         
