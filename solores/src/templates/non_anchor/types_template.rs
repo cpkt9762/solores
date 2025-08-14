@@ -270,6 +270,9 @@ impl<'a> NonAnchorTypesTemplate<'a> {
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { .. } => {
                 quote! { Default::default() }
             },
+            crate::idl_format::non_anchor_idl::NonAnchorFieldType::HashMap { .. } => {
+                quote! { std::collections::HashMap::new() }
+            },
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Complex { kind, params: _ } => {
                 // Legacy支持
                 match kind.as_str() {
@@ -380,6 +383,11 @@ impl<'a> NonAnchorTypesTemplate<'a> {
                     let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
                     quote! { #type_path }
                 }
+            },
+            crate::idl_format::non_anchor_idl::NonAnchorFieldType::HashMap { key, value } => {
+                let key_type = self.convert_idl_type_to_rust(key);
+                let value_type = self.convert_idl_type_to_rust(value);
+                quote! { std::collections::HashMap<#key_type, #value_type> }
             },
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Complex { kind, params } => {
                 // 处理复合类型，如 Vec<T>, Option<T>, [T; N] 等 (Legacy支持)

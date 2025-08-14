@@ -147,6 +147,63 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
         quote! { #(#fields)* }
     }
 
+    /// 清理类型名称，使其成为有效的Rust标识符
+    fn sanitize_type_name(type_name: &str) -> String {
+        log::debug!("🔍 清理类型名称: '{}'", type_name);
+        
+        // 特殊情况处理：常见的Rust类型模式
+        let special_type = match type_name {
+            "&'astr" | "&str" => "String".to_string(), // 字符串引用映射到 String
+            "&'a str" => "String".to_string(),
+            "str" => "String".to_string(),
+            "&[u8]" => "Vec<u8>".to_string(), // 字节数组引用映射到 Vec<u8>
+            "&[u8; 32]" => "[u8; 32]".to_string(), // 固定大小数组引用
+            "&[u8; 64]" => "[u8; 64]".to_string(),
+            _ => {
+                // 检查是否是引用类型模式 &'lifetime type
+                if type_name.starts_with("&'") && type_name.contains(' ') {
+                    let parts: Vec<&str> = type_name.split_whitespace().collect();
+                    if parts.len() == 2 {
+                        let inner_type = parts[1];
+                        log::debug!("🔍 检测到引用类型 '{}' -> '{}'", type_name, inner_type);
+                        return Self::sanitize_type_name(inner_type); // 递归处理内部类型
+                    }
+                }
+                
+                // 通用清理逻辑
+                let cleaned = type_name
+                    .replace('&', "Ref")
+                    .replace('\'', "")
+                    .replace('"', "")
+                    .replace(' ', "_")
+                    .replace('-', "_")
+                    .replace('.', "_")
+                    .replace('/', "_")
+                    .replace('\\', "_")
+                    .replace('(', "_")
+                    .replace(')', "_")
+                    .replace('[', "_")
+                    .replace(']', "_")
+                    .replace('{', "_")
+                    .replace('}', "_")
+                    .replace('<', "_")
+                    .replace('>', "_")
+                    .replace(':', "_")
+                    .replace(';', "_");
+                
+                // 确保以字母开头
+                if cleaned.is_empty() || (!cleaned.chars().next().unwrap().is_ascii_alphabetic() && cleaned.chars().next().unwrap() != '_') {
+                    format!("Type_{}", cleaned)
+                } else {
+                    cleaned
+                }
+            }
+        };
+        
+        log::debug!("✅ 类型名称清理结果: '{}' -> '{}'", type_name, special_type);
+        special_type
+    }
+
     /// 转换 NonAnchorFieldType 为 Rust 类型
     fn convert_typedef_field_type_to_rust(field_type: &NonAnchorFieldType) -> TokenStream {
         match field_type {
@@ -180,8 +237,24 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             NonAnchorFieldType::Defined { defined } => {
                 // 使用完整路径引用types模块中的类型
                 let type_path = format!("crate::types::{}", defined);
-                let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
-                quote! { #type_path }
+                log::debug!("🔍 尝试解析类型路径: '{}'", type_path);
+                match syn::parse_str::<syn::Path>(&type_path) {
+                    Ok(type_path) => quote! { #type_path },
+                    Err(e) => {
+                        log::error!("❌ 无法解析类型路径 '{}': {}", type_path, e);
+                        log::debug!("原始defined类型名: '{}'", defined);
+                        // 将无效的类型名称转换为有效的Rust标识符
+                        let safe_type_name = Self::sanitize_type_name(defined);
+                        log::debug!("清理后的类型名: '{}'", safe_type_name);
+                        let safe_ident = syn::Ident::new(&safe_type_name, proc_macro2::Span::call_site());
+                        quote! { #safe_ident }
+                    }
+                }
+            },
+            NonAnchorFieldType::HashMap { key, value } => {
+                let key_type = Self::convert_typedef_field_type_to_rust(key);
+                let value_type = Self::convert_typedef_field_type_to_rust(value);
+                quote! { std::collections::HashMap<#key_type, #value_type> }
             },
             NonAnchorFieldType::Complex { kind, params } => {
                 // 处理复合类型，如 Vec<T>, Option<T>, [T; N] 等 (Legacy支持)
@@ -594,6 +667,12 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
 
         let has_accounts = instruction.accounts.as_ref().map_or(false, |accounts| !accounts.is_empty());
         let has_args = instruction.args.as_ref().map_or(false, |args| !args.is_empty());
+        
+        // 根据是否有账户决定参数名称（避免未使用变量警告）
+        let pubkeys_param_name = if has_accounts { "pubkeys" } else { "_pubkeys" };
+        let keys_param_name = if has_accounts { "keys" } else { "_keys" };
+        let pubkeys_param = syn::Ident::new(pubkeys_param_name, proc_macro2::Span::call_site());
+        let keys_param = syn::Ident::new(keys_param_name, proc_macro2::Span::call_site());
 
         let fn_params = if has_accounts && has_args {
             quote! { keys: #keys_struct_name, args: #struct_name }
@@ -753,7 +832,7 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             }
 
             impl From<&[Pubkey]> for #keys_struct_name {
-                fn from(pubkeys: &[Pubkey]) -> Self {
+                fn from(#pubkeys_param: &[Pubkey]) -> Self {
                     Self {
                         #(#keys_from_array_fields)*
                     }
@@ -770,7 +849,7 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             }
 
             impl From<#keys_struct_name> for [solana_instruction::AccountMeta; #accounts_len_const] {
-                fn from(keys: #keys_struct_name) -> Self {
+                fn from(#keys_param: #keys_struct_name) -> Self {
                     [
                         #(#keys_into_metas_fields)*
                     ]

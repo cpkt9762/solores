@@ -252,6 +252,11 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                 let type_path: syn::Path = syn::parse_str(&type_path).unwrap();
                 quote! { #type_path }
             },
+            NonAnchorFieldType::HashMap { key, value } => {
+                let key_type = Self::convert_typedef_field_type_to_rust(key);
+                let value_type = Self::convert_typedef_field_type_to_rust(value);
+                quote! { std::collections::HashMap<#key_type, #value_type> }
+            },
             NonAnchorFieldType::Complex { kind, params } => {
                 // 处理复合类型，如 Vec<T>, Option<T>, [T; N] 等 (Legacy支持)
                 match kind.as_str() {
@@ -470,6 +475,9 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             },
             NonAnchorFieldType::Defined { .. } => {
                 quote! { Default::default() }
+            },
+            NonAnchorFieldType::HashMap { .. } => {
+                quote! { std::collections::HashMap::new() }
             },
             NonAnchorFieldType::Complex { kind, params: _ } => {
                 // Legacy支持
@@ -743,7 +751,12 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             NonAnchorFieldType::Defined { .. } => {
                 8 // 自定义类型默认估算
             },
-            _ => 8, // 其他类型默认
+            NonAnchorFieldType::HashMap { .. } => {
+                4 + 0 // HashMap length prefix (4 bytes) + variable content (估算为0)
+            },
+            NonAnchorFieldType::Complex { .. } => {
+                8 // 复合类型默认大小
+            },
         }
     }
 }

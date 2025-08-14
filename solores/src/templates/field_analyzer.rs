@@ -361,6 +361,9 @@ impl FieldAllocationAnalyzer {
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Option { option } => {
                 format!("Option<{}>", Self::format_non_anchor_type(option))
             },
+            crate::idl_format::non_anchor_idl::NonAnchorFieldType::HashMap { key, value } => {
+                format!("HashMap<{}, {}>", Self::format_non_anchor_type(key), Self::format_non_anchor_type(value))
+            },
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Complex { kind, .. } => kind.clone(),
         }
     }

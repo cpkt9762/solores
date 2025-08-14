@@ -100,13 +100,35 @@ pub fn parse_idl_json(json_str: &str) -> Result<IdlFormatEnum, serde_json::Error
 fn is_anchor_format(json: &serde_json::Value) -> bool {
     // 检查Anchor特有的字段和结构
     if let Some(obj) = json.as_object() {
-        // 检查是否有Anchor特有的字段
-        if obj.contains_key("discriminator") || 
-           obj.get("metadata").and_then(|m| m.get("spec")).map(|s| s.as_str()) == Some(Some("anchor")) {
-            return true;
+        // 优先检查metadata.spec是否明确标识为非Anchor格式
+        if let Some(metadata) = obj.get("metadata") {
+            if let Some(spec) = metadata.get("spec").and_then(|s| s.as_str()) {
+                match spec {
+                    "anchor" => return true,
+                    "shank" => return false,  // shank生成的是NonAnchor格式
+                    _ => {} // 继续其他检测
+                }
+            }
+            // 检查origin字段
+            if let Some(origin) = metadata.get("origin").and_then(|s| s.as_str()) {
+                match origin {
+                    "anchor" => return true,
+                    "shank" => return false,  // shank生成的是NonAnchor格式
+                    _ => {} // 继续其他检测
+                }
+            }
         }
         
-        // 检查指令是否有8字节discriminator
+        // 检查顶级是否有8字节discriminator数组（真正的Anchor特征）
+        if let Some(discriminator) = obj.get("discriminator") {
+            if let Some(arr) = discriminator.as_array() {
+                if arr.len() == 8 {
+                    return true;
+                }
+            }
+        }
+        
+        // 检查指令是否有8字节discriminator数组（注意是discriminator不是discriminant）
         if let Some(instructions) = obj.get("instructions").and_then(|i| i.as_array()) {
             for instruction in instructions {
                 if let Some(discriminator) = instruction.get("discriminator") {
@@ -120,7 +142,7 @@ fn is_anchor_format(json: &serde_json::Value) -> bool {
             }
         }
         
-        // 检查账户是否有8字节discriminator
+        // 检查账户是否有8字节discriminator数组
         if let Some(accounts) = obj.get("accounts").and_then(|a| a.as_array()) {
             for account in accounts {
                 if let Some(discriminator) = account.get("discriminator") {

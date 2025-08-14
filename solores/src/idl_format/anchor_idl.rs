@@ -488,12 +488,16 @@ impl AnchorIdl {
             }
         };
         
-        // 获取根级别的name和version（可选，优先使用）
+        // 获取根级别的name（可选，优先使用），如果没有则从metadata获取
         let name = obj.get("name")
             .and_then(|v| v.as_str())
             .map(|s| {
                 log::debug!("🔍 从根级别获取name: {}", s);
                 s.to_string()
+            })
+            .or_else(|| {
+                log::debug!("🔍 根级别没有name字段，从metadata.name获取: {}", metadata.name);
+                Some(metadata.name.clone())
             });
             
         let version = obj.get("version")
@@ -501,6 +505,10 @@ impl AnchorIdl {
             .map(|s| {
                 log::debug!("🔍 从根级别获取version: {}", s);
                 s.to_string()
+            })
+            .or_else(|| {
+                log::debug!("🔍 根级别没有version字段，从metadata.version获取: {}", metadata.version);
+                Some(metadata.version.clone())
             });
         
         // 恢复复杂字段的解析，每个字段都有详细日志

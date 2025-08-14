@@ -124,8 +124,11 @@ class SoloresWrapper:
             with open(idl_file, 'r', encoding='utf-8') as f:
                 idl_data = json.load(f)
             
-            # 检查程序地址
+            # 检查程序地址 - 支持两种位置：顶级address和metadata.address
             program_address = idl_data.get('address', '')
+            if not program_address and 'metadata' in idl_data:
+                program_address = idl_data.get('metadata', {}).get('address', '')
+            
             if program_address == self.RAYDIUM_PROGRAM_ADDRESS:
                 log_debug(f"检测到Raydium IDL: {idl_file.name} (地址: {program_address})")
                 return True

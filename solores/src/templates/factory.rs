@@ -296,6 +296,10 @@ impl TemplateFactory {
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { defined } => {
                 crate::idl_format::anchor_idl::AnchorFieldType::defined(defined.clone())
             }
+            crate::idl_format::non_anchor_idl::NonAnchorFieldType::HashMap { key: _, value: _ } => {
+                // HashMap转换为简化的Basic类型处理
+                crate::idl_format::anchor_idl::AnchorFieldType::Basic("HashMap".to_string())
+            }
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Complex { kind, params: _ } => {
                 match kind.as_str() {
                     "Vec" => {

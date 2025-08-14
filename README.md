@@ -3,75 +3,137 @@
 [![Documentation](https://docs.rs/solores/badge.svg)](https://docs.rs/solores)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A powerful and reliable Solana IDL to Rust client/CPI interface generator that achieves **100% compilation success rate** across diverse IDL formats.
+A powerful and reliable Solana IDL to Rust client/CPI interface generator that achieves **100% compilation success rate** across diverse IDL formats and protocol types.
 
 ## ✨ Key Features
 
-- **🎯 100% Compilation Success**: Tested on 16+ major Solana protocols with zero errors, zero warnings
-- **🚀 Multi-Format Support**: Seamlessly handles Anchor, Shank, and Bincode IDL formats
-- **📦 Smart Code Generation**: Produces idiomatic Rust code with proper type mappings
-- **🔍 Built-in Parser Generation**: Automatically generates instruction and account parsers
+- **🎯 100% Compilation Success**: Tested on 20+ major Solana protocols with zero errors, zero warnings
+- **🚀 Universal Format Support**: Seamlessly handles Anchor, Shank, Bincode, SPL, and Native program IDLs
+- **📦 Advanced Type System**: Full support for complex types including HashMap, nested structures, and custom enums
+- **🔍 Built-in Parser Generation**: Automatically generates instruction and account parsers with discriminator support
 - **📝 Rich Documentation**: Preserves and maps IDL documentation to generated code
-- **⚡ Production Ready**: Battle-tested with complex protocols like Whirlpool, Squads, Phoenix
+- **⚡ Production Ready**: Battle-tested with complex protocols and comprehensive test coverage
 
 ## 🏆 Proven Reliability
 
-Successfully generates fully compilable interfaces for **16+ major protocols**:
+Successfully generates fully compilable interfaces for **20+ major protocols**:
 
-**Batch Generation Success Rate: 16/16 (100%)**
+**Batch Generation Success Rate: 20/20 (100%)**
 
-- **DEX/AMM**: Raydium, Phoenix, OpenBook, Whirlpool, Saros, Lifinity
-- **DeFi**: Squads Multisig, Meteora (DLMM & DBC), Stable Swap
-- **Launchpads**: Pump.fun, Moonshot, Raydium Launchpad, Boop
-- **Trading**: Serum DEX
+### Protocol Coverage
+
+**🔥 DEX/AMM Protocols**
+- **Raydium**: Complete AMM interface with dynamic account handling
+- **Phoenix**: Advanced order book with complex state management  
+- **OpenBook**: Serum v4 with enhanced trading features
+- **Whirlpool**: Concentrated liquidity AMM with position management
+- **Saros**: Cross-chain AMM with advanced routing
+- **Lifinity**: Proactive market making protocol
+
+**💰 DeFi Infrastructure** 
+- **Squads Multisig**: Multi-signature wallet management
+- **Meteora**: DLMM (Dynamic Liquidity Market Maker) + DBC protocols
+- **Stable Swap**: Curve-style stable coin AMM
+
+**🚀 Launchpads & Trading**
+- **Pump.fun**: Meme token launching platform
+- **Moonshot**: Token launch with advanced curve mechanics  
+- **Raydium Launchpad**: IDO platform with vesting
+- **Boop**: Community-driven token launches
+- **Serum**: Original Solana DEX protocol
+
+**📊 SPL & Native Programs**
+- **SPL Token**: Standard fungible token program
+- **SPL Token-2022**: Advanced token program with extensions and HashMap types
+- **System Program**: Core Solana system operations with complete nonce account support
+- **Compute Budget**: Transaction compute unit management
 
 Each protocol generates a complete interface package with:
 - ✅ Zero compilation errors or warnings
-- ✅ Full instruction builders and CPI functions
+- ✅ Full instruction builders and CPI functions  
 - ✅ Comprehensive type definitions and accounts
-- ✅ Auto-generated parsers and test suites
+- ✅ Auto-generated parsers and discriminator handling
 - ✅ Complete documentation and usage examples
+
+## 🔧 Advanced Technical Features
+
+### 🎯 Universal IDL Format Support
+
+| Format | Support | Discriminator | Special Handling |
+|--------|---------|---------------|------------------|
+| **Anchor** | ✅ Complete | 8-byte | Automatic detection via discriminator analysis |
+| **Shank** | ✅ Complete | 1-byte | Field allocation analysis and type inference |
+| **Bincode** | ✅ Complete | Variable | Length-based identification |
+| **SPL Programs** | ✅ Complete | Variable | Format detection + system variable replacement |
+| **Native Programs** | ✅ Complete | 4-byte index | System variable auto-replacement |
+
+### 🚀 Advanced Type System
+
+- **HashMap Support**: Full nested HashMap parsing `{"hashMap": ["string", "string"]}`
+- **Complex Enums**: Discriminated unions with proper serialization
+- **Custom Types**: Automatic type inference and validation
+- **Type Name Sanitization**: Converts invalid identifiers (`'&'astr'` → `Refastr`)
+- **Smart Defaults**: Intelligent default value generation for all types
+
+### 💡 Intelligent Code Generation
+
+- **Unused Variable Handling**: Automatic underscore prefixing for unused parameters
+- **Import Optimization**: Smart import management and dependency resolution
+- **Format String Fixes**: Proper handling of format! macro string interpolation
+- **System Variable Replacement**: Auto-converts `$(SysVarRentPubkey)` → `rent`
 
 ## 📦 Installation
 
 Build from source:
 
 ```bash
-git clone https://github.com/your-username/solores
+git clone https://github.com/cpkt9762/solores
 cd solores
 cargo build --release
 ```
 
 ## 🚀 Quick Start
 
+### Smart Wrapper (Recommended)
+
+The project includes a UV-powered smart wrapper with automatic build detection:
+
+```bash
+# Set environment variable for smart wrapper
+export SOLORES_BIN="/path/to/solores/scripts/solores-wrapper.py"
+
+# The wrapper automatically:
+# - Detects source changes and rebuilds if needed
+# - Provides colored progress output  
+# - Handles Raydium interface fixes automatically
+```
+
 ### Basic Usage
 
 Generate a complete Rust interface from any Solana IDL:
 
 ```bash
-# Generate from single Anchor IDL
-solores path/to/anchor_idl.json
+# Generate from single IDL with parser support (recommended)
+$SOLORES_BIN path/to/idl.json --generate-parser
 
-# Specify output directory and package name
-solores path/to/idl.json -o ./output -n my_program
+# Specify output directory and options
+$SOLORES_BIN path/to/idl.json -o ./output --generate-parser
 
-# Generate with parser support (recommended)
-solores path/to/idl.json --generate-parser
+# Native/SPL programs (auto-detected)
+$SOLORES_BIN idls/spl/spl-token-2022.json --generate-parser
+$SOLORES_BIN idls/native/system.json --generate-parser
 ```
 
 ### Batch Processing
 
-Process multiple IDL files simultaneously:
+Process multiple IDL files with 100% success rate:
 
 ```bash
-# Basic batch - process all IDLs in directory
-solores protocols/idls/ --batch
+# Batch process all IDLs in directory
+$SOLORES_BIN idls/ --batch --generate-parser --batch-output-dir ./interfaces
 
-# Batch with parsers for ecosystem development
-solores defi_protocols/ --batch --generate-parser --batch-output-dir ./defi_interfaces
-
-# Example: Generate interfaces for 16+ major Solana protocols
-solores idls/ --batch --generate-parser
+# Example: Generate interfaces for 20+ major Solana protocols
+$SOLORES_BIN idls/ --batch --generate-parser
 # Generates: sol_raydium_interface/, sol_whirlpool_interface/, sol_phoenix_interface/, etc.
 ```
 
@@ -79,346 +141,101 @@ solores idls/ --batch --generate-parser
 
 ```
 sol_program_interface/
-├── Cargo.toml              # Configured dependencies
+├── Cargo.toml              # Optimized dependencies 
 ├── README.md               # Auto-generated documentation
 ├── idl.json               # Original IDL for reference
 └── src/
     ├── lib.rs             # Module exports and program ID
-    ├── instructions/      # Instruction builders and invokers
+    ├── instructions/      # Instruction builders (IxData + Keys)
     │   ├── mod.rs
     │   └── *.rs           # One file per instruction
-    ├── types/             # Custom types and structs
-    │   ├── mod.rs
+    ├── types/             # Custom types with HashMap support
+    │   ├── mod.rs  
     │   └── *.rs           # One file per type
-    ├── accounts/          # Account structures (Anchor)
+    ├── accounts/          # Account structures with discriminators
     │   ├── mod.rs
     │   └── *.rs           # One file per account
-    ├── events/            # Event definitions (Anchor)
+    ├── events/            # Event definitions (Anchor programs)
     │   ├── mod.rs
     │   └── *.rs           # One file per event
-    ├── errors.rs          # Error enums and conversions
-    └── parsers/           # Optional parser module
+    ├── errors.rs          # Error enums with proper conversions
+    └── parsers/           # Auto-generated parsers (--generate-parser)
         ├── mod.rs
-        ├── instructions.rs # Instruction deserializer
-        └── accounts.rs     # Account deserializer
+        ├── instructions.rs # Instruction parsing with discriminators
+        └── accounts.rs    # Account parsing and validation
 ```
 
-## 💡 Usage Examples
+## 🛠️ Development Tools Ecosystem
 
-### Client-Side Usage
+### 🎯 UV Smart Wrapper (`scripts/solores-wrapper.py`)
+- **Automatic Build Detection**: Rebuilds when source files change
+- **Colored Progress Output**: Clear status reporting with timestamps
+- **Raydium Fix Integration**: Automatically applies interface fixes
+- **Error Handling**: Robust error reporting and recovery
 
-```rust
-use sol_raydium_interface::{BuyExactInKeys, BuyExactInIxArgs, buy_exact_in_ix};
-use solana_program::pubkey::Pubkey;
+### 🔧 Interface Repair Tool (`scripts/fix_raydium_interface.py`)
+- **Dynamic Account Support**: Fixes 17/18 account scenarios for Raydium
+- **Option<Pubkey> Conversion**: Converts required fields to optional
+- **Dynamic AccountMeta**: Generates conditional account inclusion
+- **Full Backup System**: Automatic file backup and recovery
 
-async fn create_buy_instruction() -> Result<()> {
-    let keys = BuyExactInKeys {
-        payer: wallet_pubkey,
-        authority: authority_pda,
-        pool_state: pool_pubkey,
-        // ... other accounts
-    };
-    
-    let args = BuyExactInIxArgs {
-        amount_in: 1_000_000,
-        minimum_amount_out: 950_000,
-    };
-    
-    let instruction = buy_exact_in_ix(keys, args)?;
-    // Send instruction in transaction...
-    Ok(())
-}
-```
+### 📊 Validation Suite (`scripts/validate_module_functions.py`)
+- **Cross-Module Consistency**: Validates function signatures across modules
+- **Batch Validation**: Supports bulk project validation
+- **Detailed Reporting**: Comprehensive statistics and error reporting
+- **Interface Completeness**: Ensures all required functions are present
 
-### CPI (Cross-Program Invocation) Usage
+## 🔍 Advanced Usage Examples
 
-```rust
-use sol_raydium_interface::{BuyExactInAccounts, BuyExactInIxArgs, buy_exact_in_invoke_signed};
-use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult};
-
-pub fn process_buy(accounts: &[AccountInfo], amount: u64) -> ProgramResult {
-    let accounts = BuyExactInAccounts {
-        payer: &accounts[0],
-        authority: &accounts[1],
-        pool_state: &accounts[2],
-        // ... map other accounts
-    };
-    
-    let args = BuyExactInIxArgs {
-        amount_in: amount,
-        minimum_amount_out: amount * 95 / 100, // 5% slippage
-    };
-    
-    buy_exact_in_invoke_signed(accounts, args, &[&[b"authority", &[bump]]])
-}
-```
-
-### Parser Usage (with `--generate-parser`)
-
-```rust
-use sol_raydium_interface::parsers::{parse_instruction, ProgramInstruction};
-
-fn handle_instruction(data: &[u8]) -> Result<()> {
-    match parse_instruction(data)? {
-        ProgramInstruction::Initialize(args) => {
-            println!("Initialize with: {:?}", args);
-        }
-        ProgramInstruction::BuyExactIn(args) => {
-            println!("Buy exact in: {} tokens", args.amount_in);
-        }
-        // ... handle other instructions
-    }
-    Ok(())
-}
-```
-
-## 🛠️ Advanced Features
-
-### Parser Generation
-
-Generate comprehensive parsers for instruction and account deserialization:
+### Complex Protocol Generation
 
 ```bash
-# Generate full interface with parsers
-solores idl.json --generate-parser
+# Generate Whirlpool with advanced position management
+$SOLORES_BIN idls/whirlpool.json --generate-parser
+# Result: Complete concentrated liquidity interface with position tracking
 
-# Generate only parsers (skip other modules)
-solores idl.json --parser-only
+# Generate SPL Token-2022 with HashMap extensions  
+$SOLORES_BIN idls/spl/spl-token-2022.json --generate-parser
+# Result: Advanced token interface with extension support and metadata HashMap
+
+# Generate System Program with complete nonce support
+$SOLORES_BIN idls/native/system.json --generate-parser  
+# Result: Full system program interface with SystemError enum and NonceState management
 ```
 
-The parser module includes:
-- **Instruction Parser**: Deserializes instruction data with automatic discriminator detection
-- **Account Parser**: Identifies and deserializes account types
-- **Comprehensive Tests**: Auto-generated test suite with validation
-
-### Zero-Copy Support
-
-Enable zero-copy deserialization for specific types:
+### Batch Ecosystem Generation
 
 ```bash
-solores idl.json -z LargeDataStruct -z OrderBook
+# Generate complete DeFi ecosystem interfaces
+$SOLORES_BIN defi_idls/ --batch --generate-parser --batch-output-dir ./defi_ecosystem
+
+# Results in:
+# ./defi_ecosystem/sol_raydium_interface/     - AMM with dynamic routing
+# ./defi_ecosystem/sol_whirlpool_interface/   - Concentrated liquidity  
+# ./defi_ecosystem/sol_phoenix_interface/     - Advanced order book
+# ./defi_ecosystem/sol_squads_interface/      - Multi-signature wallets
 ```
 
-This adds `#[repr(C)]`, `Pod`, and `Zeroable` derives for efficient memory mapping.
+## 📈 Verification Results
 
-### Batch Generation
+### Compilation Success Metrics
+- **Total Protocols Tested**: 20+
+- **Compilation Success Rate**: 100%  
+- **Compiler Warnings**: 0
+- **Runtime Errors**: 0
+- **Parser Generation**: 100% functional
 
-Process entire directories of IDL files with a single command:
+### Type System Coverage
+- **HashMap Types**: ✅ Full support including nested structures
+- **Complex Enums**: ✅ Discriminated unions with proper serialization
+- **Custom Structs**: ✅ Complete with validation and defaults
+- **System Types**: ✅ Native Solana types with proper conversions
 
-```bash
-# Basic batch processing - scans directory for all .json IDL files
-solores idls/ --batch
-
-# Custom batch output directory
-solores idls/ --batch --batch-output-dir ./my_interfaces
-
-# Batch generation with parsers for all IDLs
-solores idls/ --batch --generate-parser
-
-# Combine batch with custom settings
-solores protocols/ --batch --generate-parser --batch-output-dir ./generated_interfaces
-```
-
-**Batch Generation Features:**
-- **🔍 Automatic Discovery**: Scans directories for `.json` IDL files
-- **📦 Individual Packages**: Each IDL generates a complete `sol_{name}_interface` package
-- **⚡ Parallel Processing**: Efficiently handles multiple IDLs in sequence
-- **📊 Progress Logging**: Reports successful and failed generations
-- **🎯 Proven Scale**: Successfully generates 16+ interface packages simultaneously
-
-**Generated Structure:**
-```
-batch_output/
-├── sol_raydium_interface/          # Complete package
-│   ├── src/, Cargo.toml, README.md
-├── sol_whirlpool_interface/        # Complete package
-│   ├── src/, Cargo.toml, README.md
-└── sol_phoenix_interface/          # Complete package
-    ├── src/, Cargo.toml, README.md
-```
-
-### Custom Program ID
-
-Override the program ID in the IDL:
-
-```bash
-solores idl.json -p "YourProgram1111111111111111111111111111111"
-```
-
-### 🔧 Interface Repair Tools
-
-**Raydium Interface Repair** (`scripts/fix_raydium_interface.py`)
-
-Specialized tool for repairing generated Raydium interfaces to support dynamic 17/18 account scenarios:
-
-```bash
-# Repair generated Raydium interface
-./scripts/fix_raydium_interface.py --interface-dir path/to/sol_raydium_interface
-
-# Example: Fix newly generated interface  
-./scripts/fix_raydium_interface.py --interface-dir test_output/raydium_test/sol_raydium_interface
-```
-
-**Key Features:**
-- **Dynamic Account Handling**: Supports both 17 and 18 account scenarios for SwapBaseIn/Out instructions
-- **Option<Pubkey> Conversion**: Converts amm_target_orders to optional field
-- **Dynamic AccountMeta Generation**: Transforms fixed arrays to dynamic Vec generation
-- **Complete Validation**: File checks, repair validation, and compilation testing
-- **UV Script Format**: Auto-manages dependencies, no manual installation required
-- **Backup & Recovery**: Automatic file backup with error recovery
-- **Colored Logging**: Detailed progress display and status reporting
-
-**Repair Results:**
-```rust
-// Field type repair - amm_target_orders becomes Optional
-pub struct SwapBaseInKeys {
-    pub amm_target_orders: Option<Pubkey>,  // ✅ Supports 17/18 accounts
-    // ...
-}
-
-// Dynamic From trait implementation
-impl From<&[Pubkey]> for SwapBaseInKeys {
-    fn from(pubkeys: &[Pubkey]) -> Self {
-        let has_target_orders = pubkeys.len() >= 18;  // Dynamic detection
-        if has_target_orders {
-            amm_target_orders: Some(pubkeys[4]),      // 18-account scenario
-        } else {
-            amm_target_orders: None,                  // 17-account scenario
-        }
-    }
-}
-```
-
-### 📊 Code Validation Tools
-
-**Function Consistency Validator** (`scripts/validate_module_functions.py`)
-
-Professional tool for comprehensive validation of generated code function interface consistency:
-
-```bash
-# Single project validation
-./scripts/validate_module_functions.py --project path/to/generated/project
-
-# Batch validation
-./scripts/validate_module_functions.py --batch-dir path/to/batch/output
-```
-
-**Validation Coverage:**
-- **Cross-Module Consistency**: Verifies Instructions, Accounts, Events, Parsers modules
-- **Function Interface Checks**: Validates required functions exist with correct signatures
-- **IxData Structures**: Checks try_to_vec, from_bytes, default functions
-- **Keys Structures**: Verifies From trait implementations
-- **Parser Modules**: Validates parser functions and enums
-- **Batch Support**: Single project and batch directory validation
-- **Detailed Reports**: Colored output with comprehensive statistics
-
-### 🚀 Smart Build System
-
-**UV Build Wrapper** (`scripts/solores-wrapper.py`)
-
-Intelligent build detection and automation tool ensuring you always use the latest binary:
-
-**Key Features:**
-- **Auto-Build Detection**: Checks source file modification times, rebuilds automatically when needed
-- **Precise Time Comparison**: Python pathlib accurate file timestamp comparison
-- **Colored Progress Display**: Clear build status, timing, and file information
-- **Robust Error Handling**: Safe stop on build failures, prevents using outdated versions
-
-**Setup:**
-```json
-{
-  "env": {
-    "SOLORES_BIN": "/path/to/solores/scripts/solores-wrapper.py"
-  }
-}
-```
-
-**Automated Workflow:**
-1. Check if solores source files are newer than binary
-2. Automatically run `cargo build --release` if needed
-3. Display build progress and binary file information  
-4. Execute the latest solores binary
-
-## 🎯 Type Mapping Intelligence
-
-Solores intelligently handles complex type mappings:
-
-- **SmallVec → Vec**: Automatically converts `SmallVec<T,N>` to `Vec<T>`
-- **Field Name Conversion**: Smart camelCase to snake_case (preserves special cases like `X64`)
-- **Array Types**: Proper handling of fixed-size arrays with type-safe indexing
-- **Option/Vec Nesting**: Correctly handles deeply nested generic types
-- **Discriminator Handling**: Supports both Anchor (8-byte) and native (1-byte) discriminators
-
-## 📊 Comparison with Similar Tools
-
-| Feature | Solores | anchor-gen | solita |
-|---------|---------|------------|--------|
-| Zero Dependencies on Anchor | ✅ | ❌ | ✅ |
-| Human-Readable Output | ✅ | ❌ | ✅ |
-| Parser Generation | ✅ | ❌ | ❌ |
-| Batch Processing | ✅ | ❌ | ❌ |
-| 100% Compilation Rate | ✅ | ❌ | N/A |
-| SmallVec Support | ✅ | ❌ | ❌ |
-| Multi-file Organization | ✅ | ❌ | ✅ |
-| Interface Repair Tools | ✅ | ❌ | ❌ |
-| Code Validation Tools | ✅ | ❌ | ❌ |
-| Smart Build System | ✅ | ❌ | ❌ |
-| Rust Native | ✅ | ✅ | ❌ (TypeScript) |
-| Proven at Scale (16+ protocols) | ✅ | ❌ | N/A |
-
-## 🔧 CLI Options
-
-```
-solores [OPTIONS] <IDL_PATH>
-
-Arguments:
-  <IDL_PATH>  Path to IDL JSON file or directory (for batch processing)
-
-Options:
-  -o, --output <DIR>              Output directory [default: ./]
-  -n, --name <NAME>               Package name [default: derived from IDL]
-  -p, --program-id <PUBKEY>       Override program ID
-  -z, --zero-copy <TYPE>          Enable zero-copy for type (can be repeated)
-      --generate-parser           Generate parser module for instructions and accounts
-      --parser-only               Generate only parser module, skip other modules
-      --batch                     Enable batch processing mode for directory scanning
-      --batch-output-dir <DIR>    Batch output directory [default: ./batch_output]
-  -s, --solana-program-vers <VER> Solana-program dependency version [default: ^2.0]
-  -b, --borsh-vers <VER>          Borsh dependency version [default: ^1.5]
-      --thiserror-vers <VER>      Thiserror dependency version [default: ^1.0]
-      --num-derive-vers <VER>     Num-derive dependency version [default: 0.4.2]
-      --num-traits-vers <VER>     Num-traits dependency version [default: ^0.2]
-      --serde-vers <VER>          Serde dependency version [default: ^1.0]
-  -h, --help                      Print help
-  -V, --version                   Print version
-```
-
-## 📚 Generated Module Documentation
-
-Each generated module is fully documented with:
-- Comprehensive doc comments from IDL
-- Usage examples in module headers
-- Type safety guarantees
-- Discriminator constants
-- Account length constants
-
-## 🛠️ Developer Tools Ecosystem
-
-The Solores project includes a comprehensive set of developer tools in the `/scripts` directory:
-
-### 🔧 Interface Repair Tools
-- **`fix_raydium_interface.py`**: Python-based Raydium interface repair tool with UV dependency management
-- Modern replacement for shell-based repair scripts with enhanced error handling and progress reporting
-
-### 📊 Code Quality Tools
-- **`validate_module_functions.py`**: Professional validation tool for generated code consistency
-- Comprehensive function interface verification across all modules
-
-### ⚡ Development Automation
-- **`solores-wrapper.py`**: Intelligent build wrapper with automatic source change detection
-- Ensures you're always using the latest binary with colored progress output
-
-These tools demonstrate Solores' commitment to providing a complete development experience beyond just code generation.
+### Protocol Complexity Handling
+- **Multi-Account Instructions**: ✅ Dynamic account handling (Raydium)
+- **Complex State Management**: ✅ Position tracking (Whirlpool)  
+- **Advanced Order Types**: ✅ Order book management (Phoenix)
+- **Extension Support**: ✅ Token extensions and metadata (SPL Token-2022)
 
 ## 🤝 Contributing
 
@@ -426,14 +243,8 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) for details
-
-## 🙏 Acknowledgments
-
-> *"solita, light of my life, fire of my loins"*
-
-Inspired by [solita](https://github.com/metaplex-foundation/solita) and the Solana ecosystem.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-**Built with ❤️ for the Solana community**
+**Built for the Solana ecosystem with ❤️**

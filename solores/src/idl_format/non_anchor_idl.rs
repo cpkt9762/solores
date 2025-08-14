@@ -260,6 +260,11 @@ pub enum NonAnchorFieldType {
     Defined {
         defined: String,
     },
+    /// 哈希映射类型：{"hashMap": ["key类型", "value类型"]}
+    HashMap {
+        key: Box<NonAnchorFieldType>,
+        value: Box<NonAnchorFieldType>,
+    },
     /// 复合类型
     Complex {
         /// 类型种类
@@ -540,6 +545,30 @@ impl NonAnchorFieldType {
                             });
                         } else {
                             return Err("Array must have exactly 2 elements [type, size]".to_string());
+                        }
+                    }
+                }
+                
+                // 检查 "hashMap" 类型 - {"hashMap": ["key类型", "value类型"]}
+                if let Some(hashmap_value) = map.get("hashMap") {
+                    eprintln!("🔍 Found hashMap type, processing...");
+                    if let serde_json::Value::Array(arr) = hashmap_value {
+                        if arr.len() == 2 {
+                            eprintln!("🔄 RECURSION: Parsing hashMap key type: {:?}", 
+                                     serde_json::to_string(&arr[0]).unwrap_or_default());
+                            // 递归解析key类型
+                            let key_type = Self::parse_value(arr[0].clone())?;
+                            eprintln!("🔄 RECURSION: Parsing hashMap value type: {:?}", 
+                                     serde_json::to_string(&arr[1]).unwrap_or_default());
+                            // 递归解析value类型
+                            let value_type = Self::parse_value(arr[1].clone())?;
+                            eprintln!("✅ NonAnchorFieldType: HashMap({:?}, {:?})", key_type, value_type);
+                            return Ok(NonAnchorFieldType::HashMap {
+                                key: Box::new(key_type),
+                                value: Box::new(value_type),
+                            });
+                        } else {
+                            return Err("HashMap must have exactly 2 elements [key_type, value_type]".to_string());
                         }
                     }
                 }
