@@ -821,13 +821,13 @@ impl AnchorFieldType {
                     match defined_value {
                         // 格式1: {"defined": "TypeName"}
                         serde_json::Value::String(name) => {
-                            eprintln!("✅ AnchorFieldType: defined({}) [string format]", name);
+                            log::trace!("✅ AnchorFieldType: defined({}) [string format]", name);
                             return Ok(AnchorFieldType::defined(name.clone()));
                         }
                         // 格式2: {"defined": {"name": "TypeName"}}
                         serde_json::Value::Object(defined_obj) => {
                             if let Some(serde_json::Value::String(name)) = defined_obj.get("name") {
-                                eprintln!("✅ AnchorFieldType: defined({}) [object format]", name);
+                                log::trace!("✅ AnchorFieldType: defined({}) [object format]", name);
                                 return Ok(AnchorFieldType::defined(name.clone()));
                             }
                         }
@@ -837,10 +837,10 @@ impl AnchorFieldType {
                 
                 // 检查 "array" 类型
                 if let Some(array_value) = map.get("array") {
-                    eprintln!("🔍 Found array type, processing...");
+                    log::trace!("🔍 Found array type, processing...");
                     if let serde_json::Value::Array(arr) = array_value {
                         if arr.len() == 2 {
-                            eprintln!("🔄 RECURSION: Parsing array inner type: {:?}", 
+                            log::trace!("🔄 RECURSION: Parsing array inner type: {:?}", 
                                      serde_json::to_string(&arr[0]).unwrap_or_default());
                             // 递归解析内部类型
                             let inner = Self::parse_value(arr[0].clone())?;
@@ -850,7 +850,7 @@ impl AnchorFieldType {
                             } else {
                                 return Err("Array size must be a number".to_string());
                             };
-                            eprintln!("✅ AnchorFieldType: array({:?}, {})", inner, size);
+                            log::trace!("✅ AnchorFieldType: array({:?}, {})", inner, size);
                             return Ok(AnchorFieldType::array(Box::new(inner), size));
                         }
                     }
@@ -858,27 +858,27 @@ impl AnchorFieldType {
                 
                 // 检查 "vec" 类型
                 if let Some(vec_value) = map.get("vec") {
-                    eprintln!("🔍 Found vec type, processing...");
-                    eprintln!("🔄 RECURSION: Parsing vec inner type: {:?}", 
+                    log::trace!("🔍 Found vec type, processing...");
+                    log::trace!("🔄 RECURSION: Parsing vec inner type: {:?}", 
                              serde_json::to_string(vec_value).unwrap_or_default());
                     let inner = Self::parse_value(vec_value.clone())?;
-                    eprintln!("✅ AnchorFieldType: vec({:?})", inner);
+                    log::trace!("✅ AnchorFieldType: vec({:?})", inner);
                     return Ok(AnchorFieldType::vec(Box::new(inner)));
                 }
                 
                 // 检查 "option" 类型
                 if let Some(option_value) = map.get("option") {
-                    eprintln!("🔍 Found option type, processing...");
-                    eprintln!("🔄 RECURSION: Parsing option inner type: {:?}", 
+                    log::trace!("🔍 Found option type, processing...");
+                    log::trace!("🔄 RECURSION: Parsing option inner type: {:?}", 
                              serde_json::to_string(option_value).unwrap_or_default());
                     let inner = Self::parse_value(option_value.clone())?;
-                    eprintln!("✅ AnchorFieldType: option({:?})", inner);
+                    log::trace!("✅ AnchorFieldType: option({:?})", inner);
                     return Ok(AnchorFieldType::option(Box::new(inner)));
                 }
                 
                 // 处理Complex类型
                 if let Some(serde_json::Value::String(kind_str)) = map.get("kind") {
-                    eprintln!("✅ AnchorFieldType: Complex(kind: {})", kind_str);
+                    log::trace!("✅ AnchorFieldType: Complex(kind: {})", kind_str);
                     let params = map.get("params").map(|p| vec![p.clone()]);
                     return Ok(AnchorFieldType::Complex {
                         kind: kind_str.clone(),
@@ -886,19 +886,19 @@ impl AnchorFieldType {
                     });
                 }
                 
-                eprintln!("❌ Unknown AnchorFieldType object format with keys: {:?}", map.keys().collect::<Vec<_>>());
+                log::trace!("❌ Unknown AnchorFieldType object format with keys: {:?}", map.keys().collect::<Vec<_>>());
                 Err("Unknown AnchorFieldType object format".to_string())
             }
             
             _ => {
-                eprintln!("❌ Invalid AnchorFieldType format: {:?}", value);
+                log::trace!("❌ Invalid AnchorFieldType format: {:?}", value);
                 Err("Invalid AnchorFieldType format".to_string())
             }
         };
         
         // 递归深度计数器递减
         ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
-        eprintln!("📊 AnchorFieldType recursion depth after: {}", 
+        log::trace!("📊 AnchorFieldType recursion depth after: {}", 
                  ANCHOR_FIELD_TYPE_RECURSION_DEPTH.load(Ordering::SeqCst));
         
         result
@@ -919,15 +919,15 @@ impl AnchorTypeKind {
     fn parse_type_kind(value: serde_json::Value) -> Result<Self, String> {
         // 递归深度监控
         let depth = ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
-        eprintln!("📊 AnchorTypeKind recursion depth: {}", depth);
+        log::trace!("📊 AnchorTypeKind recursion depth: {}", depth);
         
         if depth > 500 {
-            eprintln!("🚨 AnchorTypeKind RECURSION LIMIT EXCEEDED! Depth: {}", depth);
+            log::trace!("🚨 AnchorTypeKind RECURSION LIMIT EXCEEDED! Depth: {}", depth);
             ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("AnchorTypeKind recursion too deep: {}", depth));
         }
         
-        eprintln!("🔍 AnchorTypeKind::parse_type_kind called with: {:?}", 
+        log::trace!("🔍 AnchorTypeKind::parse_type_kind called with: {:?}", 
                  serde_json::to_string(&value).unwrap_or_default());
         
         let result = match value {
@@ -948,7 +948,7 @@ impl AnchorTypeKind {
             
             // 单个AnchorFieldType（Alias变体）
             _ => {
-                eprintln!("🔄 RECURSION: AnchorTypeKind parsing as Alias");
+                log::trace!("🔄 RECURSION: AnchorTypeKind parsing as Alias");
                 let field_type = AnchorFieldType::parse_value(value)?;
                 Ok(AnchorTypeKind::Alias(field_type))
             }
@@ -956,7 +956,7 @@ impl AnchorTypeKind {
         
         // 递归深度计数器递减
         ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
-        eprintln!("📊 AnchorTypeKind recursion depth after: {}", 
+        log::trace!("📊 AnchorTypeKind recursion depth after: {}", 
                  ANCHOR_TYPE_KIND_RECURSION_DEPTH.load(Ordering::SeqCst));
         
         result

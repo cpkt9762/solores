@@ -486,14 +486,14 @@ impl NonAnchorFieldType {
             return Err(format!("NonAnchorFieldType recursion too deep: {}", depth));
         }
         
-        eprintln!("📊 NonAnchorFieldType recursion depth: {}", depth);
-        eprintln!("🔍 NonAnchorFieldType::parse_value called with: {:?}", 
+        log::trace!("📊 NonAnchorFieldType recursion depth: {}", depth);
+        log::trace!("🔍 NonAnchorFieldType::parse_value called with: {:?}", 
                  serde_json::to_string(&value).unwrap_or_default());
         
         let result = match value {
             // 优先处理简单字符串类型，避免递归
             serde_json::Value::String(s) => {
-                eprintln!("✅ NonAnchorFieldType: Basic({})", s);
+                log::trace!("✅ NonAnchorFieldType: Basic({})", s);
                 Ok(NonAnchorFieldType::Basic(s))
             }
             
@@ -502,11 +502,11 @@ impl NonAnchorFieldType {
                 
                 // 检查 "option" 类型 - {"option": "内部类型"}
                 if let Some(option_value) = map.get("option") {
-                    eprintln!("🔍 Found option type, processing...");
-                    eprintln!("🔄 RECURSION: Parsing option inner type: {:?}", 
+                    log::trace!("🔍 Found option type, processing...");
+                    log::trace!("🔄 RECURSION: Parsing option inner type: {:?}", 
                              serde_json::to_string(option_value).unwrap_or_default());
                     let inner = Self::parse_value(option_value.clone())?;
-                    eprintln!("✅ NonAnchorFieldType: Option({:?})", inner);
+                    log::trace!("✅ NonAnchorFieldType: Option({:?})", inner);
                     return Ok(NonAnchorFieldType::Option {
                         option: Box::new(inner),
                     });
@@ -514,11 +514,11 @@ impl NonAnchorFieldType {
                 
                 // 检查 "vec" 类型 - {"vec": "内部类型"}
                 if let Some(vec_value) = map.get("vec") {
-                    eprintln!("🔍 Found vec type, processing...");
-                    eprintln!("🔄 RECURSION: Parsing vec inner type: {:?}", 
+                    log::trace!("🔍 Found vec type, processing...");
+                    log::trace!("🔄 RECURSION: Parsing vec inner type: {:?}", 
                              serde_json::to_string(vec_value).unwrap_or_default());
                     let inner = Self::parse_value(vec_value.clone())?;
-                    eprintln!("✅ NonAnchorFieldType: Vec({:?})", inner);
+                    log::trace!("✅ NonAnchorFieldType: Vec({:?})", inner);
                     return Ok(NonAnchorFieldType::Vec {
                         vec: Box::new(inner),
                     });
@@ -526,10 +526,10 @@ impl NonAnchorFieldType {
                 
                 // 检查 "array" 类型 - {"array": ["内部类型", 大小]}
                 if let Some(array_value) = map.get("array") {
-                    eprintln!("🔍 Found array type, processing...");
+                    log::trace!("🔍 Found array type, processing...");
                     if let serde_json::Value::Array(arr) = array_value {
                         if arr.len() == 2 {
-                            eprintln!("🔄 RECURSION: Parsing array inner type: {:?}", 
+                            log::trace!("🔄 RECURSION: Parsing array inner type: {:?}", 
                                      serde_json::to_string(&arr[0]).unwrap_or_default());
                             // 递归解析内部类型
                             let inner = Self::parse_value(arr[0].clone())?;
@@ -539,7 +539,7 @@ impl NonAnchorFieldType {
                             } else {
                                 return Err("Array size must be a number".to_string());
                             };
-                            eprintln!("✅ NonAnchorFieldType: Array({:?}, {})", inner, size);
+                            log::trace!("✅ NonAnchorFieldType: Array({:?}, {})", inner, size);
                             return Ok(NonAnchorFieldType::Array {
                                 array: (Box::new(inner), size),
                             });
@@ -551,18 +551,18 @@ impl NonAnchorFieldType {
                 
                 // 检查 "hashMap" 类型 - {"hashMap": ["key类型", "value类型"]}
                 if let Some(hashmap_value) = map.get("hashMap") {
-                    eprintln!("🔍 Found hashMap type, processing...");
+                    log::trace!("🔍 Found hashMap type, processing...");
                     if let serde_json::Value::Array(arr) = hashmap_value {
                         if arr.len() == 2 {
-                            eprintln!("🔄 RECURSION: Parsing hashMap key type: {:?}", 
+                            log::trace!("🔄 RECURSION: Parsing hashMap key type: {:?}", 
                                      serde_json::to_string(&arr[0]).unwrap_or_default());
                             // 递归解析key类型
                             let key_type = Self::parse_value(arr[0].clone())?;
-                            eprintln!("🔄 RECURSION: Parsing hashMap value type: {:?}", 
+                            log::trace!("🔄 RECURSION: Parsing hashMap value type: {:?}", 
                                      serde_json::to_string(&arr[1]).unwrap_or_default());
                             // 递归解析value类型
                             let value_type = Self::parse_value(arr[1].clone())?;
-                            eprintln!("✅ NonAnchorFieldType: HashMap({:?}, {:?})", key_type, value_type);
+                            log::trace!("✅ NonAnchorFieldType: HashMap({:?}, {:?})", key_type, value_type);
                             return Ok(NonAnchorFieldType::HashMap {
                                 key: Box::new(key_type),
                                 value: Box::new(value_type),
@@ -576,7 +576,7 @@ impl NonAnchorFieldType {
                 // 检查 "defined" 类型 - {"defined": "类型名"}
                 if let Some(defined_value) = map.get("defined") {
                     if let serde_json::Value::String(type_name) = defined_value {
-                        eprintln!("✅ NonAnchorFieldType: Defined({})", type_name);
+                        log::trace!("✅ NonAnchorFieldType: Defined({})", type_name);
                         return Ok(NonAnchorFieldType::Defined {
                             defined: type_name.clone(),
                         });
@@ -587,7 +587,7 @@ impl NonAnchorFieldType {
                 
                 // 检查复合类型 - {"kind": "类型", "params": [...]}
                 if let Some(serde_json::Value::String(kind_str)) = map.get("kind") {
-                    eprintln!("✅ NonAnchorFieldType: Complex(kind: {})", kind_str);
+                    log::trace!("✅ NonAnchorFieldType: Complex(kind: {})", kind_str);
                     let params = map.get("params").map(|p| vec![p.clone()]);
                     return Ok(NonAnchorFieldType::Complex {
                         kind: kind_str.clone(),
@@ -595,20 +595,20 @@ impl NonAnchorFieldType {
                     });
                 }
                 
-                eprintln!("❌ Unknown NonAnchorFieldType object format with keys: {:?}", 
+                log::trace!("❌ Unknown NonAnchorFieldType object format with keys: {:?}", 
                          map.keys().collect::<Vec<_>>());
                 Err("Unknown NonAnchorFieldType object format".to_string())
             }
             
             _ => {
-                eprintln!("❌ Invalid NonAnchorFieldType format: {:?}", value);
+                log::trace!("❌ Invalid NonAnchorFieldType format: {:?}", value);
                 Err("Invalid NonAnchorFieldType format".to_string())
             }
         };
         
         // 递归深度计数器递减
         NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
-        eprintln!("📊 NonAnchorFieldType recursion depth after: {}", 
+        log::trace!("📊 NonAnchorFieldType recursion depth after: {}", 
                  NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.load(Ordering::SeqCst));
         
         result
