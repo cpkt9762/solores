@@ -802,7 +802,10 @@ impl<'a> AnchorInstructionsTemplate<'a> {
 
         // 生成IxData to_json字段
         let to_json_fields = if let Some(args) = &ix.args {
-            let mut fields = vec![quote! { "\"discriminator\":\"[u8; 8]\"".to_string() }];
+            // 使用实际的discriminator数组而不是硬编码字符串
+            let mut fields = vec![quote! { 
+                format!("\"discriminator\":[{}]", self.discriminator.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))
+            }];
             let arg_fields: Vec<_> = args.iter().map(|arg| {
                 let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
@@ -820,6 +823,14 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                             }
                         }
                     }
+                    crate::idl_format::anchor_idl::AnchorFieldType::defined(_) => {
+                        // Defined类型使用serde_json序列化
+                        quote! { format!("\"{}\":{}", #snake_field_name, serde_json::to_string(&self.#field_name).unwrap_or_else(|_| "null".to_string())) }
+                    }
+                    crate::idl_format::anchor_idl::AnchorFieldType::option(_) => {
+                        // Option类型使用serde_json序列化
+                        quote! { format!("\"{}\":{}", #snake_field_name, serde_json::to_string(&self.#field_name).unwrap_or_else(|_| "null".to_string())) }
+                    }
                     _ => {
                         quote! { format!("\"{}\":{}", #snake_field_name, self.#field_name) }
                     }
@@ -828,7 +839,10 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             fields.extend(arg_fields);
             fields
         } else {
-            vec![quote! { "\"discriminator\":\"[u8; 8]\"".to_string() }]
+            // 使用实际的discriminator数组而不是硬编码字符串
+            vec![quote! { 
+                format!("\"discriminator\":[{}]", self.discriminator.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))
+            }]
         };
 
         // 生成Keys to_json字段

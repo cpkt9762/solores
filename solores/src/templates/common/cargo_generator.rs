@@ -70,7 +70,7 @@ impl<'a> CargoTomlGenerator<'a> {
         deps.insert("borsh".to_string(), self.create_dependency_value(&self.args.borsh_vers));
 
         // 完全细分化的Solana依赖 - 无需solana-program
-        deps.insert("solana-pubkey".to_string(), self.create_features_dependency_value("2.4.0", vec!["borsh", "curve25519"]));
+        deps.insert("solana-pubkey".to_string(), self.create_features_dependency_value("2.4.0", vec!["borsh", "curve25519", "serde"]));
         deps.insert("solana-program-error".to_string(), self.create_dependency_value("2.2.2"));
         deps.insert("solana-instruction".to_string(), self.create_dependency_value("2.3.0"));
         
@@ -83,6 +83,7 @@ impl<'a> CargoTomlGenerator<'a> {
         deps.insert("serde".to_string(), self.create_optional_features_dependency_value(&self.args.serde_vers, vec!["derive"]));
         deps.insert("serde_with".to_string(), self.create_optional_dependency_value(&self.args.serde_with_vers));
         deps.insert("serde-big-array".to_string(), self.create_optional_dependency_value(&self.args.serde_big_array_vers));
+        deps.insert("serde_json".to_string(), self.create_optional_dependency_value("^1.0"));
 
         // 错误处理相关依赖
         if self.dependency_profile.has_errors {
@@ -150,6 +151,7 @@ impl<'a> CargoTomlGenerator<'a> {
             Value::String("dep:serde".to_string()),
             Value::String("dep:serde_with".to_string()),
             Value::String("dep:serde-big-array".to_string()),
+            Value::String("dep:serde_json".to_string()),
         ];
         features.insert("serde".to_string(), Value::Array(serde_deps));
 

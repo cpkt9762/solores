@@ -138,6 +138,12 @@ pub struct Args {
 
     #[arg(
         long,
+        help = "generate to_json methods for instructions and accounts (requires serde feature)"
+    )]
+    pub generate_to_json: bool,
+
+    #[arg(
+        long,
         help = "only generate parser code (skip interface generation)"
     )]
     pub parser_only: bool,

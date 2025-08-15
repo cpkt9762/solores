@@ -721,7 +721,10 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
 
         // 生成IxData to_json字段
         let to_json_fields = if let Some(args) = &instruction.args {
-            let mut fields = vec![quote! { "\"discriminator\":\"u8\"".to_string() }];
+            // 使用实际的discriminator值而不是硬编码字符串
+            let mut fields = vec![quote! { 
+                format!("\"discriminator\":{}", self.discriminator)
+            }];
             let arg_fields: Vec<_> = args.iter().map(|arg| {
                 let field_name = syn::Ident::new(&arg.name.to_case(Case::Snake), proc_macro2::Span::call_site());
                 let field_name_str = &arg.name;
@@ -735,9 +738,12 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                         quote! { format!("\"{}\":{:?}", #field_name_str, self.#field_name) }
                     }
                 } else {
-                    // 检查是否为自定义类型
-                    if matches!(&arg.field_type, crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { .. }) {
-                        quote! { format!("\"{}\":{{...}}", #field_name_str) }
+                    // 检查是否为特殊类型 - 同时检查枚举类型和字符串格式
+                    if matches!(&arg.field_type, crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { .. })
+                        || matches!(&arg.field_type, crate::idl_format::non_anchor_idl::NonAnchorFieldType::Option { .. })
+                        || type_str.starts_with("Option<") {
+                        // 复杂类型使用serde_json序列化
+                        quote! { format!("\"{}\":{}", #field_name_str, serde_json::to_string(&self.#field_name).unwrap_or_else(|_| "null".to_string())) }
                     } else {
                         quote! { format!("\"{}\":{}", #field_name_str, self.#field_name) }
                     }
@@ -746,7 +752,10 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             fields.extend(arg_fields);
             fields
         } else {
-            vec![quote! { "\"discriminator\":\"u8\"".to_string() }]
+            // 使用实际的discriminator值而不是硬编码字符串
+            vec![quote! { 
+                format!("\"discriminator\":{}", self.discriminator)
+            }]
         };
 
         // 生成Keys to_json字段
@@ -754,7 +763,10 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             accounts.iter().map(|account| {
                 let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
                 let account_name_str = &account.name;
-                quote! { format!("\"{}\":\"{}\"", #account_name_str, self.#field_name) }
+                
+                // 统一使用serde_json序列化所有账户字段
+                // 这样可以处理Pubkey和Option<Pubkey>两种类型
+                quote! { format!("\"{}\":{}", #account_name_str, serde_json::to_string(&self.#field_name).unwrap_or_else(|_| "\"null\"".to_string())) }
             }).collect()
         } else {
             vec![]
