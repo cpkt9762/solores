@@ -137,6 +137,11 @@ pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<()
     log::debug!("使用程序ID: {}", program_id);
     
     let mut contents = quote! {
+        // 屏蔽生成代码的常见警告
+        #![allow(unused_imports)]
+        #![allow(dead_code)]
+        #![allow(unused_variables)]
+        
         use solana_pubkey::{pubkey, Pubkey};
         
         pub static ID: Pubkey = pubkey!(#program_id);

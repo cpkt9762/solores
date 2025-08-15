@@ -3,7 +3,7 @@
 use std::{
     env,
     fs::{self, File, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -117,6 +117,13 @@ pub struct Args {
 
     #[arg(
         long,
+        help = "serde-big-array dependency version for generated crate",
+        default_value = "^0.5"
+    )]
+    pub serde_big_array_vers: String,
+
+    #[arg(
+        long,
         help = "bytemuck dependency version for generated crate",
         default_value = "^1.16"
     )]
@@ -226,12 +233,60 @@ fn clean_path(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
+/// 设置日志系统，debug及以上级别输出到文件，终端不输出日志
+fn setup_logging() {
+    use env_logger::{Builder, Target};
+    use log::LevelFilter;
+    
+    // 清理旧的日志文件
+    let log_file_path = "debug_output.log";
+    if std::path::Path::new(log_file_path).exists() {
+        let _ = std::fs::remove_file(log_file_path);
+    }
+    
+    // 创建文件写入器
+    let log_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(log_file_path)
+        .expect("无法创建日志文件");
+    
+    let current_dir = env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
+    
+    // 获取日志级别
+    let log_level = env::var(RUST_LOG_ENV_VAR)
+        .unwrap_or_else(|_| "debug".to_string());
+    
+    // 配置：所有日志输出到文件，终端不输出日志
+    let mut builder = Builder::new();
+    builder
+        .target(Target::Pipe(Box::new(log_file)))
+        .filter_level(LevelFilter::Debug)
+        .format(|buf, record| {
+            use std::io::Write;
+            let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
+            let file = record.file().unwrap_or("unknown");
+            let line = record.line().unwrap_or(0);
+            writeln!(buf, "[{}] {} [{}:{}]: {}", timestamp, record.level(), file, line, record.args())
+        })
+        .init();
+    
+    // 终端只显示日志文件位置
+    println!("🔍 Debug日志输出到: {}/{}", current_dir, log_file_path);
+    println!("📊 当前日志级别: {}", log_level);
+}
+
 /// The CLI entrypoint
 pub fn main() {
     if env::var(RUST_LOG_ENV_VAR).is_err() {
-        env::set_var(RUST_LOG_ENV_VAR, "info")
+        env::set_var(RUST_LOG_ENV_VAR, "debug")
     }
-    env_logger::init();
+    
+    // 配置日志输出到文件和终端
+    setup_logging();
     log_panics::init();
 
     let args = Args::parse();

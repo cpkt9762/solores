@@ -57,8 +57,23 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
         });
 
 
+        // Generate to_json match arms for ProgramInstruction enum
+        let to_json_match_arms = instructions.iter().map(|ix| {
+            let variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
+            let ix_name = &ix.name;
+            quote! {
+                Self::#variant_name(keys, data) => {
+                    format!("{{\"instruction\":\"{}\",\"keys\":{},\"data\":{}}}", 
+                        #ix_name, 
+                        keys.to_json(), 
+                        data.to_json()
+                    )
+                }
+            }
+        });
+
         // Generate match arms for parsing instructions with 1-byte discriminator
-        let match_arms = instructions.iter().enumerate().map(|(index, ix)| {
+        let match_arms = instructions.iter().enumerate().map(|(_index, ix)| {
             let variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             let const_name = syn::Ident::new(
                 &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
@@ -124,6 +139,15 @@ impl<'a> ParsersTemplateGenerator for NonAnchorParsersTemplate<'a> {
                 #(#enum_variants)*
             }
             
+            impl ProgramInstruction {
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    match self {
+                        #(#to_json_match_arms)*
+                    }
+                }
+            }
             
             /// Parse instruction data using 1-byte discriminator for non-Anchor contracts
             pub fn parse_instruction(data: &[u8], accounts: &[Pubkey]) -> Result<ProgramInstruction, std::io::Error> {

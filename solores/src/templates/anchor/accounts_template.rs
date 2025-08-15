@@ -14,7 +14,7 @@ use crate::idl_format::anchor_idl::{AnchorType, AnchorTypeKind, AnchorFieldType}
 use crate::Args;
 use crate::templates::TemplateGenerator;
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
-use crate::utils::{generate_pubkey_serde_attr, to_snake_case_with_serde};
+use crate::utils::{generate_pubkey_serde_attr, generate_large_array_serde_attr, generate_pubkey_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, parse_array_size, to_snake_case_with_serde, is_pubkey_type, is_pubkey_array_type};
 use std::cell::RefCell;
 
 /// Anchor Accounts 模板
@@ -43,6 +43,92 @@ impl<'a> AnchorAccountsTemplate<'a> {
             quote! {} 
         };
         (snake_field_name, serde_attr)
+    }
+
+    /// 检测 IDL 中是否有大数组字段（>32元素）
+    fn has_large_arrays(&self) -> bool {
+        // 检查 accounts 中的字段
+        if let Some(accounts) = &self.idl.accounts {
+            for account in accounts {
+                if let Some(fields) = &account.fields {
+                    for field in fields {
+                        let type_str = Self::format_typedef_field_type(&field.field_type);
+                        if let Some(array_size) = parse_array_size(&type_str) {
+                            if array_size > 32 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 检查 types 中的字段
+        if let Some(types) = &self.idl.types {
+            for type_def in types {
+                if let Some(AnchorTypeKind::Struct(fields)) = &type_def.kind {
+                    for field in fields {
+                        let type_str = Self::format_typedef_field_type(&field.field_type);
+                        if let Some(array_size) = parse_array_size(&type_str) {
+                            if array_size > 32 {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// 检测 IDL 中是否有 Pubkey 数组字段
+    fn has_pubkey_arrays(&self) -> bool {
+        // 检查 accounts 中的字段
+        if let Some(accounts) = &self.idl.accounts {
+            for account in accounts {
+                if let Some(fields) = &account.fields {
+                    for field in fields {
+                        let type_str = Self::format_typedef_field_type(&field.field_type);
+                        if let Some(_array_size) = parse_array_size(&type_str) {
+                            if Self::is_typedef_field_pubkey_type(&field.field_type) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 检查 types 中的字段
+        if let Some(types) = &self.idl.types {
+            for type_def in types {
+                if let Some(AnchorTypeKind::Struct(fields)) = &type_def.kind {
+                    for field in fields {
+                        let type_str = Self::format_typedef_field_type(&field.field_type);
+                        if let Some(_array_size) = parse_array_size(&type_str) {
+                            if Self::is_typedef_field_pubkey_type(&field.field_type) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 检查字段分配中的 Pubkey 数组
+        let allocation = self.idl.get_field_allocation();
+        for fields in allocation.accounts_fields.values() {
+            for field_def in fields {
+                if let Some(_array_size) = parse_array_size(&field_def.field_type) {
+                    if is_pubkey_array_type(&field_def.field_type) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     /// 生成智能的默认值，处理大数组等特殊情况
@@ -97,10 +183,22 @@ impl<'a> AnchorAccountsTemplate<'a> {
                         quote! {}
                     };
                     
+                    // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                    let large_array_serde_attr = {
+                        let type_str = Self::format_typedef_field_type(&field.field_type);
+                        if let Some(array_size) = parse_array_size(&type_str) {
+                            let is_pubkey = Self::is_typedef_field_pubkey_type(&field.field_type);
+                            generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                        } else {
+                            quote! {}
+                        }
+                    };
+                    
                     quote! {
                         #field_docs
                         #serde_attr
                         #pubkey_serde_attr
+                        #large_array_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -129,9 +227,28 @@ impl<'a> AnchorAccountsTemplate<'a> {
                             DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                         };
                         
+                        // 检查字符串类型是否为 Pubkey
+                        let pubkey_serde_attr = if Self::is_field_definition_pubkey_type(&field_def.field_type) {
+                            generate_pubkey_serde_attr()
+                        } else {
+                            quote! {}
+                        };
+                        
+                        // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                        let large_array_serde_attr = {
+                            if let Some(array_size) = parse_array_size(&field_def.field_type) {
+                                let is_pubkey = is_pubkey_array_type(&field_def.field_type);
+                                generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                            } else {
+                                quote! {}
+                            }
+                        };
+                        
                         quote! {
                             #field_docs
                             #serde_attr
+                            #pubkey_serde_attr
+                            #large_array_serde_attr
                             pub #field_name: #field_type,
                         }
                     });
@@ -350,6 +467,28 @@ impl<'a> AnchorAccountsTemplate<'a> {
         }
     }
 
+    /// 将 AnchorFieldType 转换为字符串格式（用于解析数组大小）
+    fn format_typedef_field_type(field_type: &AnchorFieldType) -> String {
+        match field_type {
+            AnchorFieldType::Basic(type_str) => type_str.clone(),
+            AnchorFieldType::defined(type_name) => type_name.clone(),
+            AnchorFieldType::array(inner_type, size) => {
+                let inner_str = Self::format_typedef_field_type(inner_type);
+                format!("[{}; {}]", inner_str, size)
+            },
+            AnchorFieldType::vec(inner_type) => {
+                let inner_str = Self::format_typedef_field_type(inner_type);
+                format!("Vec<{}>", inner_str)
+            },
+            AnchorFieldType::option(inner_type) => {
+                let inner_str = Self::format_typedef_field_type(inner_type);
+                format!("Option<{}>", inner_str)
+            },
+            AnchorFieldType::PrimitiveOrPubkey(type_str) => type_str.clone(),
+            AnchorFieldType::Complex { kind, params: _ } => kind.clone(),
+        }
+    }
+
     /// 生成 discriminator 常量
     pub fn generate_discriminator_constants(&self) -> TokenStream {
         let accounts = self.idl.accounts.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
@@ -448,7 +587,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
                                 "Account data too short for discriminator",
                             ));
                         }
-                        if &data[0..8] != #const_name {
+                        if data[0..8] != #const_name {
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
                                 format!(
@@ -666,10 +805,22 @@ impl<'a> AnchorAccountsTemplate<'a> {
                     quote! {}
                 };
                 
+                // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                let large_array_serde_attr = {
+                    let type_str = Self::format_typedef_field_type(&field.field_type);
+                    if let Some(array_size) = parse_array_size(&type_str) {
+                        let is_pubkey = Self::is_typedef_field_pubkey_type(&field.field_type);
+                        generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                    } else {
+                        quote! {}
+                    }
+                };
+                
                 quote! {
                     #field_docs
                     #serde_attr
                     #pubkey_serde_attr
+                    #large_array_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -711,10 +862,21 @@ impl<'a> AnchorAccountsTemplate<'a> {
                         quote! {}
                     };
                     
+                    // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                    let large_array_serde_attr = {
+                        if let Some(array_size) = parse_array_size(&field_def.field_type) {
+                            let is_pubkey = is_pubkey_array_type(&field_def.field_type);
+                            generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                        } else {
+                            quote! {}
+                        }
+                    };
+                    
                     quote! {
                         #field_docs
                         #serde_attr
                         #pubkey_serde_attr
+                        #large_array_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -753,11 +915,31 @@ impl<'a> AnchorAccountsTemplate<'a> {
         
         let _account_name_str = &account.name;
 
+        // 检查是否需要 BigArray 导入
+        let big_array_import = if self.has_large_arrays() {
+            use crate::utils::generate_big_array_import;
+            generate_big_array_import()
+        } else {
+            quote! {}
+        };
+
+        // 检查是否需要 Pubkey 数组序列化辅助函数
+        let pubkey_array_helpers = if self.has_pubkey_arrays() {
+            use crate::utils::generate_pubkey_array_serde_helpers;
+            generate_pubkey_array_serde_helpers()
+        } else {
+            quote! {}
+        };
+
         quote! {
             #doc_comments
             
             #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
+            #big_array_import
+            
+            // Pubkey array serialization helpers
+            #pubkey_array_helpers
             
             // Constants
             pub const #const_name: [u8; 8] = #discriminator;
@@ -790,31 +972,35 @@ impl<'a> AnchorAccountsTemplate<'a> {
                     borsh::to_vec(self)
                 }
                 
-                pub fn from_bytes(data: &[u8]) -> Result<Self, std::io::Error> {
-                    if data.len() != Self::PACKED_LEN {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "Account data length mismatch. Expected: {}, got: {}",
-                                Self::PACKED_LEN, data.len()
-                            ),
-                        ));
+                pub fn from_bytes(data: &[u8]) -> Result<Self, crate::parsers::accounts::AccountParseError> {
+                    // 优先检查discriminator（更快失败）
+                    if data.len() < 8 {
+                        return Err(crate::parsers::accounts::AccountParseError::DataTooShort {
+                            expected: 8,
+                            found: data.len(),
+                        });
                     }
                     
                     let expected_discriminator = Self::discriminator();
                     if &data[0..8] != expected_discriminator {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "Discriminator mismatch. Expected: {:?}, got: {:?}",
-                                expected_discriminator,
-                                &data[0..8]
-                            ),
-                        ));
+                        let mut found = [0u8; 8];
+                        found.copy_from_slice(&data[0..8]);
+                        return Err(crate::parsers::accounts::AccountParseError::DiscriminatorMismatch {
+                            expected: expected_discriminator,
+                            found,
+                        });
+                    }
+                    
+                    // 检查完整长度
+                    if data.len() != Self::PACKED_LEN {
+                        return Err(crate::parsers::accounts::AccountParseError::IncorrectLength {
+                            expected: Self::PACKED_LEN,
+                            found: data.len(),
+                        });
                     }
                     
                     borsh::BorshDeserialize::deserialize(&mut &data[..])
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+                        .map_err(|e| crate::parsers::accounts::AccountParseError::DeserializationFailed(e.to_string()))
                 }
             }
         }
@@ -828,6 +1014,14 @@ impl<'a> AnchorAccountsTemplate<'a> {
             },
             AnchorFieldType::PrimitiveOrPubkey(s) => {
                 matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            AnchorFieldType::array(inner_type, _) => {
+                // 递归检查数组元素类型
+                Self::is_typedef_field_pubkey_type(inner_type)
+            },
+            AnchorFieldType::option(inner_type) => {
+                // 递归检查Option内部类型
+                Self::is_typedef_field_pubkey_type(inner_type)
             },
             _ => false
         }
@@ -848,7 +1042,16 @@ impl<'a> AnchorAccountsTemplate<'a> {
         if let Some(fields) = &account.fields {
             log::debug!("  🎯 使用直接字段 ({} 个)", fields.len());
             for field in fields {
-                let field_size = Self::calculate_field_size(&field.field_type);
+                let field_size = match &field.field_type {
+                    crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => {
+                        // 对于自定义类型，使用具体的计算方法
+                        self.calculate_defined_type_size(type_name)
+                    },
+                    _ => {
+                        // 其他类型使用静态方法
+                        Self::calculate_field_size(&field.field_type)
+                    }
+                };
                 log::debug!("  📐 字段 {} ({:?}): {} 字节", field.name, field.field_type, field_size);
                 size += field_size;
             }
@@ -858,7 +1061,15 @@ impl<'a> AnchorAccountsTemplate<'a> {
             if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
                 log::debug!("  🎯 从字段分配获取 {} 个字段", allocated_fields.len());
                 for field_def in allocated_fields {
-                    let field_size = Self::calculate_field_definition_size(&field_def.field_type);
+                    let field_size = match field_def.field_type.as_str() {
+                        "VestingSchedule" => {
+                            // 特殊处理VestingSchedule类型
+                            self.calculate_defined_type_size("VestingSchedule")
+                        },
+                        _ => {
+                            Self::calculate_field_definition_size(&field_def.field_type)
+                        }
+                    };
                     log::debug!("  📐 字段 {} ({}): {} 字节", field_def.name, field_def.field_type, field_size);
                     size += field_size;
                 }
@@ -937,13 +1148,56 @@ impl<'a> AnchorAccountsTemplate<'a> {
                 4 + 0 // Vec length prefix (4 bytes) + variable content (估算为0)
             },
             AnchorFieldType::defined(_type_name) => {
-                8 // 自定义类型默认估算
+                // 自定义类型默认估算 - 由于calculate_field_size是静态方法，无法访问self
+                // 具体的类型大小计算在calculate_defined_type_size中处理
+                8
             },
             AnchorFieldType::Complex { .. } => {
                 8 // 复合类型默认估算
             },
             _ => 8, // 其他类型默认
         }
+    }
+    
+    /// 计算自定义类型的实际大小
+    fn calculate_defined_type_size(&self, type_name: &str) -> usize {
+        log::debug!("🔍 计算自定义类型 '{}' 的大小", type_name);
+        
+        // 查找类型定义
+        if let Some(types) = &self.idl.types {
+            if let Some(anchor_type) = types.iter().find(|t| t.name == type_name) {
+                let mut size = 0;
+                
+                // 根据类型种类计算大小
+                if let Some(kind) = &anchor_type.kind {
+                    match kind {
+                        crate::idl_format::anchor_idl::AnchorTypeKind::Struct(fields) => {
+                            for field in fields {
+                                let field_size = Self::calculate_field_size(&field.field_type);
+                                size += field_size;
+                                log::debug!("  📐 字段 {} ({:?}): {} 字节", field.name, field.field_type, field_size);
+                            }
+                        },
+                        crate::idl_format::anchor_idl::AnchorTypeKind::Enum(_variants) => {
+                            // 枚举通常占用1字节的discriminator + 最大变体的大小
+                            // 简化处理，使用固定大小
+                            size = 8;
+                            log::debug!("  📐 枚举类型默认: {} 字节", size);
+                        },
+                        crate::idl_format::anchor_idl::AnchorTypeKind::Alias(field_type) => {
+                            size = Self::calculate_field_size(field_type);
+                            log::debug!("  📐 别名类型 ({:?}): {} 字节", field_type, size);
+                        },
+                    }
+                }
+                
+                log::debug!("✅ 自定义类型 '{}' 总大小: {} 字节", type_name, size);
+                return size;
+            }
+        }
+        
+        log::warn!("⚠️  未找到自定义类型 '{}' 定义，使用默认8字节", type_name);
+        8 // 未找到定义时的默认值
     }
 }
 

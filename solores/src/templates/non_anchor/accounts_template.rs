@@ -11,7 +11,7 @@ use crate::idl_format::non_anchor_idl::{NonAnchorIdl, NonAnchorFieldType, NonAnc
 use crate::Args;
 use crate::templates::TemplateGenerator;
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
-use crate::utils::{generate_pubkey_serde_attr};
+use crate::utils::{generate_pubkey_serde_attr, generate_large_array_serde_attr, generate_pubkey_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, parse_array_size, is_pubkey_type};
 use std::cell::RefCell;
 
 /// 非 Anchor Accounts 模板
@@ -42,11 +42,104 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         (snake_field_name, serde_attr)
     }
 
+    /// 检测是否为 SPL Token 程序
+    fn is_spl_token_program(&self) -> bool {
+        matches!(self.idl.address.as_str(), 
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" | // SPL Token
+            "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"   // SPL Token-2022
+        )
+    }
+
+    /// 检查字段是否为 Option<Pubkey> 并且是 SPL Token 程序（需要转换为 COption<Pubkey>）
+    fn is_spl_token_coption_field(&self, field_type: &NonAnchorFieldType) -> bool {
+        if !self.is_spl_token_program() {
+            return false;
+        }
+        
+        match field_type {
+            NonAnchorFieldType::Option { option } => {
+                matches!(option.as_ref(), NonAnchorFieldType::Basic(s) if matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey"))
+            },
+            _ => false
+        }
+    }
+
+    /// 生成 SPL Token 的自定义 COption<Pubkey> 序列化注解
+    fn generate_spl_token_coption_attrs(&self) -> TokenStream {
+        if self.is_spl_token_program() {
+            quote! {
+                #[borsh(serialize_with = "serialize_coption_pubkey")]
+                #[borsh(deserialize_with = "deserialize_coption_pubkey")]
+            }
+        } else {
+            quote! {}
+        }
+    }
+
+    /// 生成 SPL Token 的 COption<Pubkey> 自定义序列化函数
+    fn generate_spl_token_coption_serializers(&self) -> TokenStream {
+        if self.is_spl_token_program() {
+            quote! {
+                // SPL Token COption<Pubkey> 自定义序列化，兼容 Pack trait
+                fn serialize_coption_pubkey<W: std::io::Write>(
+                    coption: &solana_program::program_option::COption<Pubkey>,
+                    writer: &mut W
+                ) -> std::io::Result<()> {
+                    match coption {
+                        solana_program::program_option::COption::None => {
+                            // 写入 4 字节 0 (Pack trait 兼容)
+                            borsh::BorshSerialize::serialize(&0u32, writer)?;
+                            // 填充 32 字节全零
+                            borsh::BorshSerialize::serialize(&[0u8; 32], writer)
+                        }
+                        solana_program::program_option::COption::Some(pubkey) => {
+                            // 写入 4 字节 1
+                            borsh::BorshSerialize::serialize(&1u32, writer)?;
+                            // 写入 32 字节公钥
+                            borsh::BorshSerialize::serialize(pubkey, writer)
+                        }
+                    }
+                }
+
+                fn deserialize_coption_pubkey(buf: &mut &[u8]) -> std::io::Result<solana_program::program_option::COption<Pubkey>> {
+                    let discriminant = u32::deserialize(buf)?;
+                    match discriminant {
+                        0 => {
+                            // 跳过 32 字节占位符
+                            let _ = <[u8; 32]>::deserialize(buf)?;
+                            Ok(solana_program::program_option::COption::None)
+                        }
+                        1 => {
+                            let pubkey = Pubkey::deserialize(buf)?;
+                            Ok(solana_program::program_option::COption::Some(pubkey))
+                        }
+                        _ => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("Invalid COption discriminant: {}", discriminant)
+                        ))
+                    }
+                }
+
+                use borsh::BorshDeserialize;
+            }
+        } else {
+            quote! {}
+        }
+    }
+
     /// 检查 typedef 字段类型是否为 Pubkey
     fn is_typedef_field_pubkey_type(field_type: &NonAnchorFieldType) -> bool {
         match field_type {
             NonAnchorFieldType::Basic(s) => {
                 matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
+            },
+            NonAnchorFieldType::Array { array } => {
+                // 递归检查数组元素类型
+                Self::is_typedef_field_pubkey_type(&array.0)
+            },
+            NonAnchorFieldType::Option { option } => {
+                // 递归检查Option内部类型
+                Self::is_typedef_field_pubkey_type(option)
             },
             _ => false
         }
@@ -78,8 +171,15 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                 let struct_fields = account_fields.iter().map(|field| {
                     let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
-                    let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
+                    let field_type = self.convert_typedef_field_type_to_rust_spl(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
+                    
+                    // 检查是否为 SPL Token COption<Pubkey> 字段
+                    let coption_attrs = if self.is_spl_token_coption_field(&field.field_type) {
+                        self.generate_spl_token_coption_attrs()
+                    } else {
+                        quote! {}
+                    };
                     
                     // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
                     let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&field.field_type) {
@@ -92,6 +192,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                         #field_docs
                         #serde_attr
                         #pubkey_serde_attr
+                        #coption_attrs
                         pub #field_name: #field_type,
                     }
                 });
@@ -144,7 +245,10 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             }
         });
 
+        let serializers = self.generate_spl_token_coption_serializers();
+        
         quote! {
+            #serializers
             #(#structs)*
         }
     }
@@ -213,6 +317,36 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                     }
                 }
             },
+        }
+    }
+
+    /// 转换 NonAnchorFieldType 为 Rust 类型（SPL Token 专用版本）
+    fn convert_typedef_field_type_to_rust_spl(&self, field_type: &NonAnchorFieldType) -> TokenStream {
+        let is_spl = self.is_spl_token_program();
+        log::debug!("🔍 convert_typedef_field_type_to_rust_spl: is_spl_token_program={}, address={}", is_spl, self.idl.address);
+        
+        if is_spl {
+            match field_type {
+                NonAnchorFieldType::Option { option } => {
+                    if let NonAnchorFieldType::Basic(s) = option.as_ref() {
+                        if matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey") {
+                            log::debug!("✅ Converting Option<Pubkey> to COption<Pubkey> for SPL Token");
+                            // SPL Token 程序中 Option<Pubkey> 转换为 COption<Pubkey>
+                            // 添加调试注释以验证此路径被执行
+                            return quote! { 
+                                // DEBUG: SPL Token COption<Pubkey> 转换已执行
+                                solana_program::program_option::COption<Pubkey> 
+                            };
+                        }
+                    }
+                    // 其他 Option 类型保持不变
+                    let inner_type = self.convert_typedef_field_type_to_rust_spl(option);
+                    quote! { Option<#inner_type> }
+                },
+                _ => Self::convert_typedef_field_type_to_rust(field_type)
+            }
+        } else {
+            Self::convert_typedef_field_type_to_rust(field_type)
         }
     }
 
@@ -506,7 +640,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let account_name_str = &account.name;
         
         // 计算 PACKED_LEN
-        let packed_size = Self::calculate_account_packed_size(account);
+        let packed_size = self.calculate_account_packed_size(account);
         
         // NonAnchor字段生成优先级：direct fields → field allocation → empty structures
         let struct_fields = if let Some(account_fields) = &account.fields {
@@ -514,9 +648,16 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             let field_tokens = account_fields.iter().map(|field| {
                 let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
-                let field_type = Self::convert_typedef_field_type_to_rust(&field.field_type);
+                let field_type = self.convert_typedef_field_type_to_rust_spl(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
+                // 检查是否为 SPL Token COption<Pubkey> 字段
+                let coption_attrs = if self.is_spl_token_coption_field(&field.field_type) {
+                    self.generate_spl_token_coption_attrs()
+                } else {
+                    quote! {}
+                };
+
                 // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
                 let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&field.field_type) {
                     generate_pubkey_serde_attr()
@@ -524,10 +665,25 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                     quote! {}
                 };
                 
+                // 检查是否为大数组，如果是则添加 BigArray serde 属性
+                let large_array_serde_attr = if self.is_large_array_field(&field.field_type) {
+                    use crate::utils::generate_large_array_serde_attr;
+                    if let NonAnchorFieldType::Array { array } = &field.field_type {
+                        let (_, array_size) = array;
+                        generate_large_array_serde_attr(*array_size).unwrap_or_else(|| quote! {})
+                    } else {
+                        quote! {}
+                    }
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
                     #serde_attr
+                    #coption_attrs
                     #pubkey_serde_attr
+                    #large_array_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -547,10 +703,23 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
                     quote! {}
                 };
                 
+                // 检查是否为大数组（从字符串类型解析）
+                let large_array_serde_attr = if self.is_large_array_field_from_string(&field_def.field_type) {
+                    use crate::utils::{generate_large_array_serde_attr, parse_array_size};
+                    if let Some(array_size) = parse_array_size(&field_def.field_type) {
+                        generate_large_array_serde_attr(array_size).unwrap_or_else(|| quote! {})
+                    } else {
+                        quote! {}
+                    }
+                } else {
+                    quote! {}
+                };
+                
                 quote! {
                     #field_docs
                     #serde_attr
                     #pubkey_serde_attr
+                    #large_array_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -591,9 +760,17 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         let _has_types_module = self.idl.types.as_ref().map_or(false, |types| !types.is_empty());
         
         // 生成导入语句 - 不使用通配符导入，类型引用使用完整路径
+        let big_array_import = if self.has_large_arrays(account) {
+            use crate::utils::generate_big_array_import;
+            generate_big_array_import()
+        } else {
+            quote! {}
+        };
+        
         let imports = quote! {
             #[allow(unused_imports)]
             use solana_pubkey::Pubkey;
+            #big_array_import
         };
         
         quote! {
@@ -707,8 +884,63 @@ impl<'a> TemplateGenerator for NonAnchorAccountsTemplate<'a> {
 }
 
 impl<'a> NonAnchorAccountsTemplate<'a> {
-    /// 计算账户的 PACKED_LEN 大小
-    fn calculate_account_packed_size(account: &NonAnchorAccount) -> usize {
+    /// 检查账户是否包含大数组（> 32 元素）
+    fn has_large_arrays(&self, account: &NonAnchorAccount) -> bool {
+        // 检查直接字段
+        if let Some(fields) = &account.fields {
+            for field in fields {
+                if self.is_large_array_field(&field.field_type) {
+                    return true;
+                }
+            }
+        }
+        
+        // 检查分配的字段
+        if let Some(allocated_fields) = self.idl.get_account_allocated_fields(&account.name) {
+            for field_def in allocated_fields {
+                if self.is_large_array_field_from_string(&field_def.field_type) {
+                    return true;
+                }
+            }
+        }
+        
+        false
+    }
+    
+    /// 检查 NonAnchorFieldType 是否为大数组
+    fn is_large_array_field(&self, field_type: &NonAnchorFieldType) -> bool {
+        if let NonAnchorFieldType::Array { array } = field_type {
+            let (_, size) = array;
+            return *size > 32;
+        }
+        false
+    }
+    
+    /// 检查字符串类型是否为大数组（用于分配字段）
+    fn is_large_array_field_from_string(&self, type_str: &str) -> bool {
+        use crate::utils::parse_array_size;
+        if let Some(size) = parse_array_size(type_str) {
+            return size > 32;
+        }
+        false
+    }
+
+    /// 计算账户的 PACKED_LEN 大小（SPL Token 专用版本）
+    fn calculate_account_packed_size(&self, account: &NonAnchorAccount) -> usize {
+        let mut size = 0; // NonAnchor 没有 discriminator
+        
+        // 添加字段大小
+        if let Some(fields) = &account.fields {
+            for field in fields {
+                size += self.calculate_field_size_spl(&field.field_type);
+            }
+        }
+        
+        size
+    }
+
+    /// 计算账户的 PACKED_LEN 大小（通用版本）
+    fn calculate_account_packed_size_static(account: &NonAnchorAccount) -> usize {
         let mut size = 0; // NonAnchor 没有 discriminator
         
         // 添加字段大小
@@ -721,6 +953,27 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
         size
     }
     
+    /// 计算单个字段的序列化大小（SPL Token 专用版本）
+    fn calculate_field_size_spl(&self, field_type: &NonAnchorFieldType) -> usize {
+        if self.is_spl_token_program() {
+            match field_type {
+                NonAnchorFieldType::Option { option } => {
+                    if let NonAnchorFieldType::Basic(s) = option.as_ref() {
+                        if matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey") {
+                            // SPL Token 程序中 Option<Pubkey> -> COption<Pubkey> = 36 字节
+                            return 36; // 4字节标志位 + 32字节公钥
+                        }
+                    }
+                    // 其他 Option 类型：1字节标志 + 内部类型大小
+                    1 + self.calculate_field_size_spl(option)
+                },
+                _ => Self::calculate_field_size(field_type)
+            }
+        } else {
+            Self::calculate_field_size(field_type)
+        }
+    }
+
     /// 计算单个字段的序列化大小
     fn calculate_field_size(field_type: &NonAnchorFieldType) -> usize {
         match field_type {
@@ -742,8 +995,8 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
             NonAnchorFieldType::Array { array: (inner_type, size) } => {
                 Self::calculate_field_size(inner_type) * size
             },
-            NonAnchorFieldType::Option { option: _inner_type } => {
-                1 + 0 // Option flag (1 byte) + inner type size (估算为0)
+            NonAnchorFieldType::Option { option: inner_type } => {
+                1 + Self::calculate_field_size(inner_type) // Option flag (1 byte) + inner type size
             },
             NonAnchorFieldType::Vec { vec: _inner_type } => {
                 4 + 0 // Vec length prefix (4 bytes) + variable content (估算为0)

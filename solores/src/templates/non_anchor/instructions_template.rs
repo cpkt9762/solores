@@ -17,7 +17,7 @@ use crate::templates::common::{
     import_manager::ImportManager,
     naming_converter::NamingConverter
 };
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, generate_option_pubkey_serde_attr, generate_option_pubkey_serde_helpers, generate_pubkey_array_serde_attr, generate_pubkey_array_serde_helpers, generate_big_array_import, parse_array_size, is_pubkey_type};
 
 /// 非 Anchor Instructions 模板
 pub struct NonAnchorInstructionsTemplate<'a> {
@@ -44,7 +44,51 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             NonAnchorFieldType::Basic(s) => {
                 matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
             },
+            NonAnchorFieldType::Array { array } => {
+                // 递归检查数组元素类型
+                Self::is_typedef_field_pubkey_type(&array.0)
+            },
+            NonAnchorFieldType::Option { option } => {
+                // 递归检查Option内部类型
+                Self::is_typedef_field_pubkey_type(option)
+            },
             _ => false
+        }
+    }
+
+    /// 检查字段类型是否为 Option<Pubkey>
+    fn is_option_pubkey_type(field_type: &NonAnchorFieldType) -> bool {
+        match field_type {
+            NonAnchorFieldType::Option { option } => {
+                matches!(option.as_ref(), NonAnchorFieldType::Basic(s) if matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey"))
+            },
+            _ => false
+        }
+    }
+
+    /// 格式化字段类型为字符串，用于数组大小解析
+    fn format_typedef_field_type(field_type: &NonAnchorFieldType) -> String {
+        match field_type {
+            NonAnchorFieldType::Basic(type_str) => type_str.clone(),
+            NonAnchorFieldType::Defined { defined } => defined.clone(),
+            NonAnchorFieldType::Array { array } => {
+                let inner_str = Self::format_typedef_field_type(&array.0);
+                format!("[{}; {}]", inner_str, array.1)
+            },
+            NonAnchorFieldType::Vec { vec } => {
+                let inner_str = Self::format_typedef_field_type(vec);
+                format!("Vec<{}>", inner_str)
+            },
+            NonAnchorFieldType::Option { option } => {
+                let inner_str = Self::format_typedef_field_type(option);
+                format!("Option<{}>", inner_str)
+            },
+            NonAnchorFieldType::HashMap { key, value } => {
+                let key_str = Self::format_typedef_field_type(key);
+                let value_str = Self::format_typedef_field_type(value);
+                format!("HashMap<{}, {}>", key_str, value_str)
+            },
+            NonAnchorFieldType::Complex { kind, params: _ } => kind.clone(),
         }
     }
 
@@ -105,8 +149,16 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
                 // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&field.field_type) {
-                    generate_pubkey_serde_attr()
+                let pubkey_serde_attr = if Self::is_option_pubkey_type(&field.field_type) {
+                    generate_option_pubkey_serde_attr()
+                } else if Self::is_typedef_field_pubkey_type(&field.field_type) {
+                    let type_str = Self::format_typedef_field_type(&field.field_type);
+                    if let Some(array_size) = parse_array_size(&type_str) {
+                        let is_pubkey = Self::is_typedef_field_pubkey_type(&field.field_type);
+                        generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                    } else {
+                        generate_pubkey_serde_attr()
+                    }
                 } else {
                     quote! {}
                 };
@@ -132,8 +184,16 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             let field_type = Self::convert_typedef_field_type_to_rust(&arg.field_type);
             
             // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-            let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&arg.field_type) {
-                generate_pubkey_serde_attr()
+            let pubkey_serde_attr = if Self::is_option_pubkey_type(&arg.field_type) {
+                generate_option_pubkey_serde_attr()
+            } else if Self::is_typedef_field_pubkey_type(&arg.field_type) {
+                let type_str = Self::format_typedef_field_type(&arg.field_type);
+                if let Some(array_size) = parse_array_size(&type_str) {
+                    let is_pubkey = Self::is_typedef_field_pubkey_type(&arg.field_type);
+                    generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                } else {
+                    generate_pubkey_serde_attr()
+                }
             } else {
                 quote! {}
             };
@@ -536,8 +596,16 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                 let field_type = self.convert_field_type_to_rust(&arg.field_type);
                 
                 // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                let pubkey_serde_attr = if Self::is_typedef_field_pubkey_type(&arg.field_type) {
-                    generate_pubkey_serde_attr()
+                let pubkey_serde_attr = if Self::is_option_pubkey_type(&arg.field_type) {
+                    generate_option_pubkey_serde_attr()
+                } else if Self::is_typedef_field_pubkey_type(&arg.field_type) {
+                    let type_str = Self::format_typedef_field_type(&arg.field_type);
+                    if let Some(array_size) = parse_array_size(&type_str) {
+                        let is_pubkey = Self::is_typedef_field_pubkey_type(&arg.field_type);
+                        generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                    } else {
+                        generate_pubkey_serde_attr()
+                    }
                 } else {
                     quote! {}
                 };
@@ -646,6 +714,47 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             accounts.iter().map(|account| {
                 let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
                 quote! { solana_instruction::AccountMeta::new(keys.#field_name, false), }
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        // 生成IxData to_json字段
+        let to_json_fields = if let Some(args) = &instruction.args {
+            let mut fields = vec![quote! { "\"discriminator\":\"u8\"".to_string() }];
+            let arg_fields: Vec<_> = args.iter().map(|arg| {
+                let field_name = syn::Ident::new(&arg.name.to_case(Case::Snake), proc_macro2::Span::call_site());
+                let field_name_str = &arg.name;
+                
+                // 为数组类型生成特殊格式化
+                let type_str = Self::format_typedef_field_type(&arg.field_type);
+                if let Some(_array_size) = parse_array_size(&type_str) {
+                    if Self::is_typedef_field_pubkey_type(&arg.field_type) {
+                        quote! { format!("\"{}\":[{}]", #field_name_str, self.#field_name.iter().map(|p| format!("\"{}\"", p)).collect::<Vec<_>>().join(",")) }
+                    } else {
+                        quote! { format!("\"{}\":{:?}", #field_name_str, self.#field_name) }
+                    }
+                } else {
+                    // 检查是否为自定义类型
+                    if matches!(&arg.field_type, crate::idl_format::non_anchor_idl::NonAnchorFieldType::Defined { .. }) {
+                        quote! { format!("\"{}\":{{...}}", #field_name_str) }
+                    } else {
+                        quote! { format!("\"{}\":{}", #field_name_str, self.#field_name) }
+                    }
+                }
+            }).collect();
+            fields.extend(arg_fields);
+            fields
+        } else {
+            vec![quote! { "\"discriminator\":\"u8\"".to_string() }]
+        };
+
+        // 生成Keys to_json字段
+        let keys_to_json_fields = if let Some(accounts) = &instruction.accounts {
+            accounts.iter().map(|account| {
+                let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
+                let account_name_str = &account.name;
+                quote! { format!("\"{}\":\"{}\"", #account_name_str, self.#field_name) }
             }).collect()
         } else {
             vec![]
@@ -769,12 +878,49 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
             &full_code_for_analysis, 
             has_types_module
         );
+
+        // 检查是否需要 Option<Pubkey> 序列化辅助函数
+        let option_pubkey_helpers = if let Some(args) = &instruction.args {
+            args.iter().any(|arg| Self::is_option_pubkey_type(&arg.field_type))
+        } else {
+            false
+        };
+
+        // 检查是否需要 Pubkey 数组序列化辅助函数
+        let pubkey_array_helpers = if let Some(args) = &instruction.args {
+            args.iter().any(|arg| {
+                let type_str = Self::format_typedef_field_type(&arg.field_type);
+                if let Some(_array_size) = parse_array_size(&type_str) {
+                    Self::is_typedef_field_pubkey_type(&arg.field_type)
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        };
+
+        let option_helpers_code = if option_pubkey_helpers {
+            generate_option_pubkey_serde_helpers()
+        } else {
+            quote! {}
+        };
+
+        let array_helpers_code = if pubkey_array_helpers {
+            generate_pubkey_array_serde_helpers()
+        } else {
+            quote! {}
+        };
         
         quote! {
             #![doc = #doc_string]
             #doc_comments
             
             #optimized_imports
+            
+            // Serialization helpers
+            #option_helpers_code
+            #array_helpers_code
             
             // Constants
             pub const #const_name: u8 = #discriminator;
@@ -815,6 +961,14 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                 pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
                     borsh::to_vec(self)
                 }
+                
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    format!("{{{}}}",
+                        [#(#to_json_fields),*].join(",")
+                    )
+                }
             }
 
             // Keys Structure for accounts
@@ -845,6 +999,14 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
                     vec![
                         #(#to_vec_fields)*
                     ]
+                }
+                
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    format!("{{{}}}",
+                        [#(#keys_to_json_fields),*].join(",")
+                    )
                 }
             }
 

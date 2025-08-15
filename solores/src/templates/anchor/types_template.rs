@@ -13,7 +13,7 @@ use crate::Args;
 use crate::templates::{TemplateGenerator, TypesTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
 use crate::templates::field_analyzer::{FieldAllocationAnalyzer, FieldAllocationMap};
-use crate::utils::{generate_pubkey_serde_attr};
+use crate::utils::{generate_pubkey_serde_attr, parse_array_size, generate_pubkey_array_serde_attr};
 use std::cell::RefCell;
 
 /// Anchor Types 模板
@@ -128,8 +128,24 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
                             let field_type = self.convert_idl_type_to_rust(&field.field_type);
                             let field_docs = DocGenerator::generate_field_docs(&field.docs);
                             
+                            // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                            let large_array_serde_attr = {
+                                let type_str = self.format_anchor_field_type(&field.field_type);
+                                log::debug!("🔍 Types template field '{}' type_str: '{}'", field.name, type_str);
+                                if let Some(array_size) = parse_array_size(&type_str) {
+                                    let is_pubkey = self.is_field_pubkey_type(&field.field_type);
+                                    log::debug!("📊 Found array size {} for field '{}', is_pubkey: {}", array_size, field.name, is_pubkey);
+                                    let result = generate_pubkey_array_serde_attr(array_size, is_pubkey);
+                                    log::debug!("🎯 Generated serde attr for field '{}': {:?}", field.name, result.is_some());
+                                    result.unwrap_or_else(|| quote! {})
+                                } else {
+                                    log::debug!("❌ No array size found for field '{}'", field.name);
+                                    quote! {}
+                                }
+                            };
+                            
                             // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                            let pubkey_serde_attr = if self.is_field_pubkey_type(&field.field_type) {
+                            let pubkey_serde_attr = if self.is_field_pubkey_type(&field.field_type) && large_array_serde_attr.is_empty() {
                                 generate_pubkey_serde_attr()
                             } else {
                                 quote! {}
@@ -139,6 +155,7 @@ impl<'a> TypesTemplateGenerator for AnchorTypesTemplate<'a> {
                                 #field_docs
                                 #serde_attr
                                 #pubkey_serde_attr
+                                #large_array_serde_attr
                                 pub #field_name: #field_type,
                             }
                         });
@@ -607,6 +624,30 @@ impl<'a> TemplateGenerator for AnchorTypesTemplate<'a> {
             
             // Re-export all type items
             #(#re_exports)*
+        }
+    }
+}
+
+impl<'a> AnchorTypesTemplate<'a> {
+    /// 格式化 AnchorFieldType 为字符串表示，用于数组大小解析
+    fn format_anchor_field_type(&self, field_type: &crate::idl_format::anchor_idl::AnchorFieldType) -> String {
+        match field_type {
+            crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, size) => {
+                let inner_str = self.format_anchor_field_type(inner_type);
+                format!("[{}; {}]", inner_str, size)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::option(inner_type) => {
+                let inner_str = self.format_anchor_field_type(inner_type);
+                format!("Option<{}>", inner_str)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::vec(inner_type) => {
+                let inner_str = self.format_anchor_field_type(inner_type);
+                format!("Vec<{}>", inner_str)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::Basic(s) => s.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::PrimitiveOrPubkey(s) => s.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => type_name.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::Complex { kind, params: _ } => kind.clone(),
         }
     }
 }

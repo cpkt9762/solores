@@ -80,8 +80,9 @@ impl<'a> CargoTomlGenerator<'a> {
         deps.insert("solana-cpi".to_string(), self.create_optional_dependency_value("2.2.1"));
 
         // 可选的serde依赖
-        deps.insert("serde".to_string(), self.create_optional_dependency_value(&self.args.serde_vers));
+        deps.insert("serde".to_string(), self.create_optional_features_dependency_value(&self.args.serde_vers, vec!["derive"]));
         deps.insert("serde_with".to_string(), self.create_optional_dependency_value(&self.args.serde_with_vers));
+        deps.insert("serde-big-array".to_string(), self.create_optional_dependency_value(&self.args.serde_big_array_vers));
 
         // 错误处理相关依赖
         if self.dependency_profile.has_errors {
@@ -126,6 +127,20 @@ impl<'a> CargoTomlGenerator<'a> {
         Value::Table(map)
     }
 
+    /// 创建可选的带特性依赖值
+    fn create_optional_features_dependency_value(&self, version: &str, features: Vec<&str>) -> Value {
+        let mut map = Map::new();
+        map.insert("version".to_string(), Value::String(version.to_string()));
+        map.insert("optional".to_string(), Value::Boolean(true));
+        
+        let feature_values: Vec<Value> = features.into_iter()
+            .map(|f| Value::String(f.to_string()))
+            .collect();
+        map.insert("features".to_string(), Value::Array(feature_values));
+        
+        Value::Table(map)
+    }
+
     /// 获取features配置
     fn get_features(&self) -> Map<String, Value> {
         let mut features = Map::new();
@@ -134,6 +149,7 @@ impl<'a> CargoTomlGenerator<'a> {
         let serde_deps = vec![
             Value::String("dep:serde".to_string()),
             Value::String("dep:serde_with".to_string()),
+            Value::String("dep:serde-big-array".to_string()),
         ];
         features.insert("serde".to_string(), Value::Array(serde_deps));
 

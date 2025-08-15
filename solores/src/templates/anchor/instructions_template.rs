@@ -16,7 +16,7 @@ use crate::templates::common::{
     import_manager::{ImportManager, ImportType, SolanaImport},
     naming_converter::NamingConverter
 };
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, parse_array_size, generate_pubkey_array_serde_attr, is_pubkey_array_type};
 
 /// Anchor Instructions 模板
 pub struct AnchorInstructionsTemplate<'a> {
@@ -331,8 +331,19 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
                     
+                    // 检查大数组序列化属性
+                    let large_array_serde_attr = {
+                        let type_str = Self::format_anchor_field_type(&arg.field_type);
+                        if let Some(array_size) = parse_array_size(&type_str) {
+                            let is_pubkey = Self::is_anchor_field_pubkey_type(&arg.field_type);
+                            generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                        } else {
+                            quote! {}
+                        }
+                    };
+                    
                     // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) {
+                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) && large_array_serde_attr.is_empty() {
                         generate_pubkey_serde_attr()
                     } else {
                         quote! {}
@@ -340,6 +351,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                     
                     quote! {
                         #serde_attr
+                        #large_array_serde_attr
                         #pubkey_serde_attr
                         pub #field_name: #field_type,
                     }
@@ -614,8 +626,19 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                 let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
                 
+                // 检查大数组序列化属性
+                let large_array_serde_attr = {
+                    let type_str = Self::format_anchor_field_type(&arg.field_type);
+                    if let Some(array_size) = parse_array_size(&type_str) {
+                        let is_pubkey = Self::is_anchor_field_pubkey_type(&arg.field_type);
+                        generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                    } else {
+                        quote! {}
+                    }
+                };
+                
                 // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) {
+                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&arg.field_type) && large_array_serde_attr.is_empty() {
                     generate_pubkey_serde_attr()
                 } else {
                     quote! {}
@@ -623,6 +646,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 
                 quote! { 
                     #serde_attr
+                    #large_array_serde_attr
                     #pubkey_serde_attr
                     pub #field_name: #field_type, 
                 }
@@ -743,15 +767,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             vec![]
         };
         
-        // 生成Keys Default实现字段
-        let keys_default_fields = if let Some(accounts) = &ix.accounts {
-            accounts.iter().map(|account| {
-                let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
-                quote! { #field_name: Pubkey::default(), }
-            }).collect()
-        } else {
-            vec![]
-        };
+        // Note: Keys Default implementation is now derived automatically
         
         // 生成to_vec字段列表
         let to_vec_fields = if let Some(accounts) = &ix.accounts {
@@ -784,6 +800,109 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             vec![]
         };
 
+        // 生成IxData to_json字段
+        let to_json_fields = if let Some(args) = &ix.args {
+            let mut fields = vec![quote! { "\"discriminator\":\"[u8; 8]\"".to_string() }];
+            let arg_fields: Vec<_> = args.iter().map(|arg| {
+                let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
+                let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
+                let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
+                
+                // 为数组类型生成特殊格式化
+                match &arg.field_type {
+                    crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, _size) => {
+                        match inner_type.as_ref() {
+                            crate::idl_format::anchor_idl::AnchorFieldType::Basic(type_name) if type_name == "pubkey" => {
+                                quote! { format!("\"{}\":[{}]", #snake_field_name, self.#field_name.iter().map(|p| format!("\"{}\"", p)).collect::<Vec<_>>().join(",")) }
+                            }
+                            _ => {
+                                quote! { format!("\"{}\":{:?}", #snake_field_name, self.#field_name) }
+                            }
+                        }
+                    }
+                    _ => {
+                        quote! { format!("\"{}\":{}", #snake_field_name, self.#field_name) }
+                    }
+                }
+            }).collect();
+            fields.extend(arg_fields);
+            fields
+        } else {
+            vec![quote! { "\"discriminator\":\"[u8; 8]\"".to_string() }]
+        };
+
+        // 生成Keys to_json字段
+        let keys_to_json_fields = if let Some(accounts) = &ix.accounts {
+            accounts.iter().map(|account| {
+                let field_name = syn::Ident::new(&account.name.to_case(Case::Snake), proc_macro2::Span::call_site());
+                let account_name_str = &account.name;
+                quote! { format!("\"{}\":\"{}\"", #account_name_str, self.#field_name) }
+            }).collect()
+        } else {
+            vec![]
+        };
+
+        // 生成 Pubkey 数组助手函数（如果需要）
+        let pubkey_array_helpers = if Self::instruction_needs_pubkey_array_helpers(ix) {
+            quote! {
+                #[cfg(feature = "serde")]
+                mod pubkey_array_serde {
+                    use super::*;
+                    use serde::{
+                        de::{SeqAccess, Visitor},
+                        ser::SerializeSeq,
+                        Deserialize, Deserializer, Serialize, Serializer,
+                    };
+                    use std::fmt;
+
+                    pub fn serialize_pubkey_array_as_strings<S, const N: usize>(
+                        array: &[Pubkey; N],
+                        serializer: S,
+                    ) -> Result<S::Ok, S::Error>
+                    where
+                        S: Serializer,
+                    {
+                        let strings: Vec<String> = array.iter().map(|pk| pk.to_string()).collect();
+                        strings.serialize(serializer)
+                    }
+
+                    pub fn deserialize_pubkey_array_from_strings<'de, D, const N: usize>(
+                        deserializer: D,
+                    ) -> Result<[Pubkey; N], D::Error>
+                    where
+                        D: Deserializer<'de>,
+                    {
+                        let strings = Vec::<String>::deserialize(deserializer)?;
+                        if strings.len() != N {
+                            return Err(serde::de::Error::invalid_length(
+                                strings.len(),
+                                &format!("exactly {} elements", N).as_str(),
+                            ));
+                        }
+
+                        let mut pubkeys = Vec::with_capacity(N);
+                        for s in strings {
+                            let pubkey = s
+                                .parse::<Pubkey>()
+                                .map_err(|e| serde::de::Error::custom(format!("Invalid Pubkey: {}", e)))?;
+                            pubkeys.push(pubkey);
+                        }
+
+                        pubkeys
+                            .try_into()
+                            .map_err(|_| serde::de::Error::custom("Failed to convert Vec to array"))
+                    }
+                }
+
+                #[cfg(feature = "serde")]
+                use pubkey_array_serde::{
+                    deserialize_pubkey_array_from_strings, serialize_pubkey_array_as_strings,
+                };
+            }
+        } else {
+            quote! {}
+        };
+
         let doc_string = format!("Instruction: {}", ix.name);
         log::debug!("📝 Doc string生成: {}", doc_string);
         
@@ -792,6 +911,8 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             #doc_comments
             
             #imports
+            
+            #pubkey_array_helpers
             
             // Constants
             pub const #discm_const_name: [u8; 8] = #discriminator;
@@ -832,20 +953,20 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                 pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
                     borsh::to_vec(self)
                 }
+                
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    format!("{{{}}}",
+                        [#(#to_json_fields),*].join(",")
+                    )
+                }
             }
 
             // Keys Structure for accounts  
-            #[derive(Copy, Clone, Debug, PartialEq)]
+            #[derive(Copy, Clone, Debug, PartialEq, Default)]
             pub struct #keys_struct_name {
                 #(#keys_fields)*
-            }
-
-            impl Default for #keys_struct_name {
-                fn default() -> Self {
-                    Self {
-                        #(#keys_default_fields)*
-                    }
-                }
             }
 
             impl From<&[Pubkey]> for #keys_struct_name {
@@ -862,6 +983,14 @@ impl<'a> AnchorInstructionsTemplate<'a> {
                     vec![
                         #(#to_vec_fields)*
                     ]
+                }
+                
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    format!("{{{}}}",
+                        [#(#keys_to_json_fields),*].join(",")
+                    )
                 }
             }
 
@@ -1036,7 +1165,90 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             AnchorFieldType::PrimitiveOrPubkey(s) => {
                 matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
             },
+            AnchorFieldType::array(inner_type, _) => {
+                // 递归检查数组元素类型
+                Self::is_anchor_field_pubkey_type(inner_type)
+            },
+            AnchorFieldType::option(inner_type) => {
+                // 递归检查Option内部类型
+                Self::is_anchor_field_pubkey_type(inner_type)
+            },
             _ => false
         }
+    }
+
+    /// 将 AnchorFieldType 转换为字符串表示
+    fn format_anchor_field_type(field_type: &AnchorFieldType) -> String {
+        match field_type {
+            AnchorFieldType::Basic(s) => s.clone(),
+            AnchorFieldType::PrimitiveOrPubkey(s) => s.clone(),
+            AnchorFieldType::array(inner_type, size) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("[{}; {}]", inner_str, size)
+            },
+            AnchorFieldType::vec(inner_type) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("Vec<{}>", inner_str)
+            },
+            AnchorFieldType::option(inner_type) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("Option<{}>", inner_str)
+            },
+            AnchorFieldType::defined(type_name) => type_name.clone(),
+            AnchorFieldType::Complex { kind, params } => {
+                match kind.as_str() {
+                    "array" => {
+                        if let Some(params) = params {
+                            if params.len() >= 2 {
+                                if let (Ok(inner_type_str), Ok(size)) = (
+                                    serde_json::from_value::<String>(params[0].clone()),
+                                    serde_json::from_value::<u32>(params[1].clone())
+                                ) {
+                                    return format!("[{}; {}]", inner_type_str, size);
+                                }
+                            }
+                        }
+                        "[u8; 32]".to_string()
+                    },
+                    "vec" => {
+                        if let Some(params) = params {
+                            if let Some(inner_param) = params.get(0) {
+                                if let Ok(inner_type_str) = serde_json::from_value::<String>(inner_param.clone()) {
+                                    return format!("Vec<{}>", inner_type_str);
+                                }
+                            }
+                        }
+                        "Vec<u8>".to_string()
+                    },
+                    "option" => {
+                        if let Some(params) = params {
+                            if let Some(inner_param) = params.get(0) {
+                                if let Ok(inner_type_str) = serde_json::from_value::<String>(inner_param.clone()) {
+                                    return format!("Option<{}>", inner_type_str);
+                                }
+                            }
+                        }
+                        "Option<u8>".to_string()
+                    },
+                    _ => kind.clone()
+                }
+            }
+        }
+    }
+
+    /// 检查指令是否需要 Pubkey 数组助手函数
+    fn instruction_needs_pubkey_array_helpers(ix: &AnchorInstruction) -> bool {
+        if let Some(args) = &ix.args {
+            for arg in args {
+                let type_str = Self::format_anchor_field_type(&arg.field_type);
+                if let Some(_array_size) = parse_array_size(&type_str) {
+                    // 对于所有Pubkey数组（不管大小）都生成助手函数，因为我们需要自定义序列化
+                    if Self::is_anchor_field_pubkey_type(&arg.field_type) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }

@@ -9,7 +9,7 @@ use heck::ToShoutySnakeCase;
 
 use crate::templates::{TemplateGenerator, EventsTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
-use crate::utils::{generate_pubkey_serde_attr};
+use crate::utils::{generate_pubkey_serde_attr, generate_pubkey_array_serde_attr, parse_array_size, is_pubkey_array_type, generate_pubkey_array_serde_helpers};
 use std::cell::RefCell;
 
 /// Anchor Events 模板
@@ -40,32 +40,53 @@ impl<'a> AnchorEventsTemplate<'a> {
 
     /// 生成事件结构体
     pub fn generate_event_structs(&self) -> TokenStream {
+        log::debug!("🎭 Events Template: 开始生成事件结构体");
         let events = self.idl.events.as_deref().unwrap_or(&[]);
         if events.is_empty() {
+            log::debug!("🎭 Events Template: 没有事件定义，返回空");
             return quote! {};
         }
 
+        log::debug!("🎭 Events Template: 找到 {} 个事件定义", events.len());
         let event_structs = events.iter().filter_map(|event| {
             let struct_name = syn::Ident::new(&event.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             
             // 开始处理事件
-            log::debug!("🎭 Events: 开始处理Event: {}", event.name);
-            log::debug!("🎭 Events: Event '{}' fields状态: {:?}", event.name, 
+            log::debug!("🎭 Events Template: ===== 开始处理Event: {} =====", event.name);
+            log::debug!("🎭 Events Template: Event '{}' fields状态: {:?}", event.name, 
                 event.fields.as_ref().map(|f| format!("Some({}个字段)", f.len())).unwrap_or("None".to_string()));
             
             // 统一使用字段分配机制：优先使用事件直接字段，否则从字段分配中获取
             if let Some(event_fields) = &event.fields {
                 // 事件有直接字段定义
-                log::debug!("🎭 Events: Event '{}' 有直接字段定义，使用直接字段", event.name);
+                log::debug!("🎭 Events Template: Event '{}' 有直接字段定义，使用直接字段", event.name);
+                log::debug!("🎭 Events Template: Event '{}' 直接字段数量: {}", event.name, event_fields.len());
                 let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                 let struct_fields = event_fields.iter().map(|field| {
+                    log::debug!("🎭 Events Template: 处理直接字段 '{}' - 类型: {:?}", field.name, field.field_type);
                     let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field.name);
                     let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                     let field_type = Self::convert_idl_type_to_rust(&field.field_type);
                     let field_docs = DocGenerator::generate_field_docs(&field.docs);
                     
+                    // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                    let large_array_serde_attr = {
+                        let type_str = Self::format_anchor_field_type(&field.field_type);
+                        log::debug!("🔍 Events Template (直接字段): field '{}' type_str: '{}'", field.name, type_str);
+                        if let Some(array_size) = parse_array_size(&type_str) {
+                            let is_pubkey = Self::is_anchor_field_pubkey_type(&field.field_type);
+                            log::debug!("📊 Events Template (直接字段): Found array size {} for field '{}', is_pubkey: {}", array_size, field.name, is_pubkey);
+                            let serde_attr = generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {});
+                            log::debug!("✅ Events Template (直接字段): 生成的serde属性 for field '{}': {}", field.name, if serde_attr.is_empty() { "空" } else { "非空" });
+                            serde_attr
+                        } else {
+                            log::debug!("❌ Events Template (直接字段): No array size found for field '{}'", field.name);
+                            quote! {}
+                        }
+                    };
+                    
                     // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) {
+                    let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) && large_array_serde_attr.is_empty() {
                         generate_pubkey_serde_attr()
                     } else {
                         quote! {}
@@ -75,6 +96,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                         #field_docs
                         #serde_attr
                         #pubkey_serde_attr
+                        #large_array_serde_attr
                         pub #field_name: #field_type,
                     }
                 });
@@ -89,14 +111,15 @@ impl<'a> AnchorEventsTemplate<'a> {
                 })
             } else {
                 // 事件没有直接字段，使用IDL字段分配机制
-                log::debug!("🎭 Events: Event '{}' 没有直接字段，尝试从字段分配获取", event.name);
-                log::debug!("🎭 Events: Event '{}' 查询字段分配结果...", event.name);
+                log::debug!("🎭 Events Template: Event '{}' 没有直接字段，尝试从字段分配获取", event.name);
+                log::debug!("🎭 Events Template: Event '{}' 查询字段分配结果...", event.name);
                 if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
-                    log::debug!("✅ Events: Event '{}' 从字段分配获取{}个字段: {:?}", 
+                    log::debug!("✅ Events Template: Event '{}' 从字段分配获取{}个字段: {:?}", 
                         event.name, allocated_fields.len(), 
                         allocated_fields.iter().map(|f| &f.name).collect::<Vec<_>>());
                     let doc_comments = DocGenerator::generate_doc_comments(&event.docs);
                     let struct_fields = allocated_fields.iter().map(|field_def| {
+                        log::debug!("🎭 Events Template: 处理分配字段 '{}' - 类型: '{}'", field_def.name, field_def.field_type);
                         let (snake_field_name, serde_attr) = self.convert_field_name_with_serde(&field_def.name);
                         let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
                         // 使用改进的类型转换逻辑
@@ -107,8 +130,23 @@ impl<'a> AnchorEventsTemplate<'a> {
                             DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                         };
                         
+                        // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                        let large_array_serde_attr = {
+                            log::debug!("🔍 Events Template (分配字段): field '{}' type: '{}'", field_def.name, field_def.field_type);
+                            if let Some(array_size) = parse_array_size(&field_def.field_type) {
+                                let is_pubkey = is_pubkey_array_type(&field_def.field_type);
+                                log::debug!("📊 Events Template (分配字段): Found array size {} for field '{}', is_pubkey: {}", array_size, field_def.name, is_pubkey);
+                                let serde_attr = generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {});
+                                log::debug!("✅ Events Template (分配字段): 生成的serde属性 for field '{}': {}", field_def.name, if serde_attr.is_empty() { "空" } else { "非空" });
+                                serde_attr
+                            } else {
+                                log::debug!("❌ Events Template (分配字段): No array size found for field '{}'", field_def.name);
+                                quote! {}
+                            }
+                        };
+                        
                         // 检查字符串类型是否为 Pubkey
-                        let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                        let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) && large_array_serde_attr.is_empty() {
                             generate_pubkey_serde_attr()
                         } else {
                             quote! {}
@@ -118,6 +156,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                             #field_docs
                             #serde_attr
                             #pubkey_serde_attr
+                            #large_array_serde_attr
                             pub #field_name: #field_type,
                         }
                     });
@@ -411,6 +450,13 @@ impl<'a> AnchorEventsTemplate<'a> {
 
         // 强制初始化字段分配缓存
         let _force_init = self.idl.get_field_allocation();
+        
+        // 检查是否需要 pubkey array helpers
+        let pubkey_helpers = if self.event_needs_pubkey_array_helpers(event) {
+            generate_pubkey_array_serde_helpers()
+        } else {
+            quote! {}
+        };
 
         // 生成事件结构体字段 - discriminator是第一个字段
         let event_fields = if let Some(fields) = &event.fields {
@@ -421,8 +467,22 @@ impl<'a> AnchorEventsTemplate<'a> {
                 let field_type = self.convert_event_field_type(&field.field_type);
                 let field_docs = DocGenerator::generate_field_docs(&field.docs);
                 
+                // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                let large_array_serde_attr = {
+                    let type_str = Self::format_anchor_field_type(&field.field_type);
+                    log::debug!("🔍 Events template (direct fields) field '{}' type_str: '{}'", field.name, type_str);
+                    if let Some(array_size) = parse_array_size(&type_str) {
+                        let is_pubkey = Self::is_anchor_field_pubkey_type(&field.field_type);
+                        log::debug!("📊 Found array size {} for direct field '{}', is_pubkey: {}", array_size, field.name, is_pubkey);
+                        generate_pubkey_array_serde_attr(array_size, is_pubkey).unwrap_or_else(|| quote! {})
+                    } else {
+                        log::debug!("❌ No array size found for direct field '{}'", field.name);
+                        quote! {}
+                    }
+                };
+                
                 // 检查是否为 Pubkey 类型，如果是则添加特殊的 serde 属性
-                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) {
+                let pubkey_serde_attr = if Self::is_anchor_field_pubkey_type(&field.field_type) && large_array_serde_attr.is_empty() {
                     generate_pubkey_serde_attr()
                 } else {
                     quote! {}
@@ -432,6 +492,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                     #field_docs
                     #serde_attr
                     #pubkey_serde_attr
+                    #large_array_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -452,8 +513,23 @@ impl<'a> AnchorEventsTemplate<'a> {
                     DocGenerator::generate_doc_comments(&Some(field_def.docs.clone())) 
                 };
                 
-                // 检查字符串类型是否为 Pubkey
-                let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) {
+                // 检查是否为大数组类型，如果是则添加特殊的 serde 属性
+                let large_array_serde_attr = {
+                    log::debug!("🔍 Events template (allocated fields) field '{}' type: '{}'", field_def.name, field_def.field_type);
+                    if let Some(array_size) = parse_array_size(&field_def.field_type) {
+                        let is_pubkey = is_pubkey_array_type(&field_def.field_type);
+                        log::debug!("📊 Found array size {} for allocated field '{}', is_pubkey: {}", array_size, field_def.name, is_pubkey);
+                        let result = generate_pubkey_array_serde_attr(array_size, is_pubkey);
+                        log::debug!("✅ Generated serde attr for allocated field '{}': {:?}", field_def.name, result.is_some());
+                        result.unwrap_or_else(|| quote! {})
+                    } else {
+                        log::debug!("❌ No array size found for allocated field '{}'", field_def.name);
+                        quote! {}
+                    }
+                };
+                
+                // 检查字符串类型是否为 Pubkey（仅当没有大数组属性时）
+                let pubkey_serde_attr = if Self::is_string_field_pubkey_type(&field_def.field_type) && large_array_serde_attr.is_empty() {
                     generate_pubkey_serde_attr()
                 } else {
                     quote! {}
@@ -463,6 +539,7 @@ impl<'a> AnchorEventsTemplate<'a> {
                     #field_docs
                     #serde_attr
                     #pubkey_serde_attr
+                    #large_array_serde_attr
                     pub #field_name: #field_type,
                 }
             });
@@ -542,6 +619,9 @@ impl<'a> AnchorEventsTemplate<'a> {
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
                 }
             }
+            
+            // 添加 pubkey array helper functions 如果需要的话
+            #pubkey_helpers
         }
     }
 
@@ -601,7 +681,7 @@ impl<'a> AnchorEventsTemplate<'a> {
 }
 
 impl<'a> AnchorEventsTemplate<'a> {
-    /// 检查 Anchor 字段类型是否为 Pubkey
+    /// 检查 Anchor 字段类型是否为 Pubkey（递归检查数组和选项类型）
     fn is_anchor_field_pubkey_type(field_type: &crate::idl_format::anchor_idl::AnchorFieldType) -> bool {
         match field_type {
             crate::idl_format::anchor_idl::AnchorFieldType::Basic(s) => {
@@ -610,6 +690,18 @@ impl<'a> AnchorEventsTemplate<'a> {
             crate::idl_format::anchor_idl::AnchorFieldType::PrimitiveOrPubkey(s) => {
                 matches!(s.as_str(), "publicKey" | "pubkey" | "Pubkey")
             },
+            crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, _) => {
+                // 递归检查数组元素类型
+                Self::is_anchor_field_pubkey_type(inner_type)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::option(inner_type) => {
+                // 递归检查Option内部类型
+                Self::is_anchor_field_pubkey_type(inner_type)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::vec(inner_type) => {
+                // 递归检查Vec内部类型
+                Self::is_anchor_field_pubkey_type(inner_type)
+            },
             _ => false
         }
     }
@@ -617,6 +709,56 @@ impl<'a> AnchorEventsTemplate<'a> {
     /// 检查字符串字段类型是否为 Pubkey
     fn is_string_field_pubkey_type(type_str: &str) -> bool {
         matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
+    }
+    
+    /// 将 Anchor 字段类型格式化为字符串表示
+    fn format_anchor_field_type(field_type: &crate::idl_format::anchor_idl::AnchorFieldType) -> String {
+        match field_type {
+            crate::idl_format::anchor_idl::AnchorFieldType::array(inner_type, size) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("[{}; {}]", inner_str, size)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::option(inner_type) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("Option<{}>", inner_str)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::vec(inner_type) => {
+                let inner_str = Self::format_anchor_field_type(inner_type);
+                format!("Vec<{}>", inner_str)
+            },
+            crate::idl_format::anchor_idl::AnchorFieldType::Basic(s) => s.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::PrimitiveOrPubkey(s) => s.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::defined(type_name) => type_name.clone(),
+            crate::idl_format::anchor_idl::AnchorFieldType::Complex { kind, params: _ } => kind.clone(),
+        }
+    }
+    
+    /// 检查事件是否需要 pubkey array helper functions
+    fn event_needs_pubkey_array_helpers(&self, event: &crate::idl_format::anchor_idl::AnchorEvent) -> bool {
+        // 检查直接字段中的 Pubkey 数组
+        if let Some(fields) = &event.fields {
+            for field in fields {
+                let type_str = Self::format_anchor_field_type(&field.field_type);
+                if let Some(_array_size) = parse_array_size(&type_str) {
+                    if Self::is_anchor_field_pubkey_type(&field.field_type) {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        // 检查字段分配中的 Pubkey 数组
+        if let Some(allocated_fields) = self.idl.get_event_allocated_fields(&event.name) {
+            for field_def in allocated_fields {
+                if let Some(_array_size) = parse_array_size(&field_def.field_type) {
+                    if is_pubkey_array_type(&field_def.field_type) {
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        false
     }
 }
 

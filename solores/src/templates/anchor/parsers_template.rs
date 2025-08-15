@@ -55,8 +55,32 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             }
         };
 
-        // Generate tests using the test template (only if --test flag is enabled)
+        // Generate instruction name and to_json match arms for ProgramInstruction enum
         let instructions = self.idl.instructions.as_ref().map(|v| v.as_slice()).unwrap_or(&[]);
+        
+        // 使用NamingConverter来确保命名规范一致性
+        use crate::templates::common::naming_converter::NamingConverter;
+        use std::cell::RefCell;
+        let naming_converter = RefCell::new(NamingConverter::new());
+        
+        let program_instruction_name = format!("{}Instruction", naming_converter.borrow_mut().to_pascal_case(&self.idl.program_name()));
+        let program_instruction_ident = syn::Ident::new(&program_instruction_name, proc_macro2::Span::call_site());
+        
+        let to_json_match_arms = instructions.iter().map(|ix| {
+            let variant_name = syn::Ident::new(&naming_converter.borrow_mut().to_pascal_case(&ix.name), proc_macro2::Span::call_site());
+            let ix_name = &ix.name;
+            quote! {
+                Self::#variant_name(keys, data) => {
+                    format!("{{\"instruction\":\"{}\",\"keys\":{},\"data\":{}}}", 
+                        #ix_name, 
+                        keys.to_json(), 
+                        data.to_json()
+                    )
+                }
+            }
+        });
+
+        // Generate tests using the test template (only if --test flag is enabled)
         let tests = if !instructions.is_empty() && self.args.test {
             let test_generator = AnchorInstructionsParserTestTemplate::new();
             let test_content = test_generator.generate_instructions_consistency_tests(instructions, self.idl.program_name());
@@ -81,6 +105,16 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             use crate::instructions::*;
             
             #enum_def
+            
+            impl #program_instruction_ident {
+                /// Manual JSON serialization
+                #[cfg(feature = "serde")]
+                pub fn to_json(&self) -> String {
+                    match self {
+                        #(#to_json_match_arms)*
+                    }
+                }
+            }
             
             #helper_functions
             
@@ -135,8 +169,15 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             );
             
             quote! {
-                if let Ok(account) = #struct_name::from_bytes(data) {
-                    return Ok(#program_name::#variant_name(account));
+                match #struct_name::from_bytes(data) {
+                    Ok(account) => return Ok(#program_name::#variant_name(account)),
+                    Err(AccountParseError::DiscriminatorMismatch { .. }) => {
+                        // Discriminator不匹配，继续尝试下一个账户类型
+                    }
+                    Err(e) => {
+                        // 其他错误（数据太短、长度错误、反序列化失败）立即返回
+                        return Err(e.into());
+                    }
                 }
             }
         });
@@ -165,6 +206,46 @@ impl<'a> ParsersTemplateGenerator for AnchorParsersTemplate<'a> {
             #imports
             use crate::accounts::*;
             // 移除导入，使用完整路径 std::io::Error
+            
+            /// Account parsing error types
+            #[derive(Clone, Debug, PartialEq)]
+            pub enum AccountParseError {
+                /// Discriminator does not match any known account type - can try next account
+                DiscriminatorMismatch { expected: [u8; 8], found: [u8; 8] },
+                /// Data is too short to contain discriminator - should not try other accounts
+                DataTooShort { expected: usize, found: usize },
+                /// Data length is incorrect for this account type - should not try other accounts  
+                IncorrectLength { expected: usize, found: usize },
+                /// Failed to deserialize account data - should not try other accounts
+                DeserializationFailed(String),
+            }
+            
+            impl std::fmt::Display for AccountParseError {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    match self {
+                        AccountParseError::DiscriminatorMismatch { expected, found } => {
+                            write!(f, "Discriminator mismatch. Expected: {:?}, found: {:?}", expected, found)
+                        },
+                        AccountParseError::DataTooShort { expected, found } => {
+                            write!(f, "Account data too short. Expected at least {} bytes, got: {}", expected, found)
+                        },
+                        AccountParseError::IncorrectLength { expected, found } => {
+                            write!(f, "Account data length mismatch. Expected: {}, got: {}", expected, found)
+                        },
+                        AccountParseError::DeserializationFailed(msg) => {
+                            write!(f, "Failed to deserialize account data: {}", msg)
+                        },
+                    }
+                }
+            }
+            
+            impl std::error::Error for AccountParseError {}
+            
+            impl From<AccountParseError> for std::io::Error {
+                fn from(err: AccountParseError) -> std::io::Error {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+                }
+            }
             
             /// Program account types
             #[derive(Clone, Debug, PartialEq)]

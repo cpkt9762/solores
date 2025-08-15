@@ -698,6 +698,152 @@ class CrossModuleFunctionValidator:
             struct_name.endswith('Account')
         )
 
+class NamingConventionValidator:
+    """Rust命名约定检测器"""
+    
+    def __init__(self):
+        # snake_case 正则：小写字母开头，可包含下划线和数字
+        self.snake_case_pattern = re.compile(r'^[a-z][a-z0-9_]*$')
+        # PascalCase 正则：大写字母开头，后续为字母数字
+        self.pascal_case_pattern = re.compile(r'^[A-Z][a-zA-Z0-9]*$')
+        # camelCase 正则：小写字母开头，后续可有大写字母
+        self.camel_case_pattern = re.compile(r'^[a-z][a-zA-Z0-9]*$')
+        
+        # 字段定义模式：pub field_name: Type
+        self.field_pattern = re.compile(r'pub\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*[^,\n}]+[,\n}]')
+        # 结构体定义模式：pub struct StructName
+        self.struct_name_pattern = re.compile(r'pub\s+struct\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        # 枚举定义模式：pub enum EnumName
+        self.enum_name_pattern = re.compile(r'pub\s+enum\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        # 函数定义模式：pub fn function_name
+        self.function_name_pattern = re.compile(r'pub\s+fn\s+([a-zA-Z_][a-zA-Z0-9_]*)')
+        # 变量声明模式：let variable_name = (不包括模式匹配)
+        # 排除 if let 和复杂模式匹配，只匹配简单的 let var = 
+        self.variable_pattern = re.compile(r'(?<!if\s)let\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=')
+        
+    def detect_naming_violations(self, file_path: pathlib.Path) -> Dict[str, List[str]]:
+        """检测命名约定违规"""
+        violations = {
+            'non_snake_case_fields': [],
+            'non_snake_case_functions': [], 
+            'non_snake_case_variables': [],
+            'non_pascal_case_types': [],
+            'camel_case_found': []  # 意外的camelCase使用
+        }
+        
+        if not file_path.exists():
+            return violations
+            
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except Exception as e:
+            log_warning(f"读取文件失败 {file_path}: {e}")
+            return violations
+        
+        # 检测字段名
+        for match in self.field_pattern.finditer(content):
+            field_name = match.group(1)
+            # 跳过一些特殊字段名
+            if field_name in ['Self', 'self', '_phantom']:
+                continue
+                
+            if not self.snake_case_pattern.match(field_name):
+                if self.camel_case_pattern.match(field_name) and any(c.isupper() for c in field_name[1:]):
+                    violations['camel_case_found'].append(f"字段 {field_name}")
+                else:
+                    violations['non_snake_case_fields'].append(field_name)
+        
+        # 检测函数名  
+        for match in self.function_name_pattern.finditer(content):
+            func_name = match.group(1)
+            # 跳过一些特殊函数名
+            if func_name in ['new', 'default', 'clone', 'from']:
+                continue
+                
+            if not self.snake_case_pattern.match(func_name):
+                violations['non_snake_case_functions'].append(func_name)
+        
+        # 检测结构体名
+        for match in self.struct_name_pattern.finditer(content):
+            struct_name = match.group(1) 
+            if not self.pascal_case_pattern.match(struct_name):
+                violations['non_pascal_case_types'].append(f"struct {struct_name}")
+        
+        # 检测枚举名
+        for match in self.enum_name_pattern.finditer(content):
+            enum_name = match.group(1)
+            if not self.pascal_case_pattern.match(enum_name):
+                violations['non_pascal_case_types'].append(f"enum {enum_name}")
+        
+        # 检测变量名（在函数体内）
+        for match in self.variable_pattern.finditer(content):
+            var_name = match.group(1)
+            # 跳过下划线开头的变量（通常是有意未使用的）
+            if var_name.startswith('_'):
+                continue
+                
+            if not self.snake_case_pattern.match(var_name):
+                violations['non_snake_case_variables'].append(var_name)
+        
+        return violations
+    
+    def validate_module_naming(self, module_info: ModuleInfo) -> ValidationResult:
+        """验证模块的命名约定"""
+        if not module_info.exists:
+            return ValidationResult(True, f"{module_info.name}模块不存在，跳过命名检查")
+        
+        all_violations = {}
+        
+        if module_info.path.is_file():
+            # 单文件模块
+            violations = self.detect_naming_violations(module_info.path)
+            if any(violations.values()):
+                all_violations[module_info.path.name] = violations
+        else:
+            # 目录模块
+            for rs_file in module_info.path.glob("*.rs"):
+                if rs_file.name == "mod.rs":
+                    continue
+                violations = self.detect_naming_violations(rs_file)
+                if any(violations.values()):
+                    all_violations[rs_file.name] = violations
+        
+        # 生成验证结果
+        errors = []
+        warnings = []
+        
+        for file_name, violations in all_violations.items():
+            if violations['non_snake_case_fields']:
+                errors.append(f"{file_name}: 字段名违反snake_case: {', '.join(violations['non_snake_case_fields'][:3])}" + 
+                             (f" 等{len(violations['non_snake_case_fields'])}个" if len(violations['non_snake_case_fields']) > 3 else ""))
+            
+            if violations['non_snake_case_functions']:
+                errors.append(f"{file_name}: 函数名违反snake_case: {', '.join(violations['non_snake_case_functions'][:3])}" +
+                             (f" 等{len(violations['non_snake_case_functions'])}个" if len(violations['non_snake_case_functions']) > 3 else ""))
+            
+            if violations['non_pascal_case_types']:
+                errors.append(f"{file_name}: 类型名违反PascalCase: {', '.join(violations['non_pascal_case_types'][:3])}" +
+                             (f" 等{len(violations['non_pascal_case_types'])}个" if len(violations['non_pascal_case_types']) > 3 else ""))
+            
+            if violations['non_snake_case_variables']:
+                warnings.append(f"{file_name}: 变量名违反snake_case: {', '.join(violations['non_snake_case_variables'][:3])}" +
+                               (f" 等{len(violations['non_snake_case_variables'])}个" if len(violations['non_snake_case_variables']) > 3 else ""))
+            
+            if violations['camel_case_found']:
+                warnings.append(f"{file_name}: 发现camelCase字段: {', '.join(violations['camel_case_found'][:3])}" +
+                               (f" 等{len(violations['camel_case_found'])}个" if len(violations['camel_case_found']) > 3 else ""))
+        
+        success = len(errors) == 0
+        message = f"{module_info.name}模块命名约定: {'通过' if success else '发现问题'}"
+        
+        details = []
+        if errors:
+            details.extend([f"错误: {e}" for e in errors])
+        if warnings:
+            details.extend([f"警告: {w}" for w in warnings])
+        
+        return ValidationResult(success, message, details)
+
 class SoloresModuleFunctionValidator:
     """Solores模块函数验证器主类"""
     
@@ -705,6 +851,7 @@ class SoloresModuleFunctionValidator:
         self.project_path = project_path
         self.src_path = project_path / "src"
         self.parser = FunctionSignatureParser()
+        self.naming_validator = NamingConventionValidator()
         self.modules = {}
         
         # 检查IDL类型
@@ -797,7 +944,7 @@ class SoloresModuleFunctionValidator:
                         constants=set()
                     )
     
-    def validate_project(self) -> Dict[str, ValidationResult]:
+    def validate_project(self, check_naming: bool = False, strict_naming: bool = False) -> Dict[str, ValidationResult]:
         """验证整个项目"""
         self.scan_modules()
         
@@ -827,6 +974,25 @@ class SoloresModuleFunctionValidator:
         # 跨模块一致性验证
         cross_validator = CrossModuleFunctionValidator(self.modules)
         results['cross_module'] = cross_validator.validate()
+        
+        # 命名约定验证（可选）
+        if check_naming:
+            for module_name in ['instructions', 'accounts', 'types', 'events', 'parsers']:
+                if module_name in self.modules:
+                    naming_result = self.naming_validator.validate_module_naming(self.modules[module_name])
+                    
+                    # 严格模式：将警告视为错误
+                    if strict_naming:
+                        # 如果存在警告，将其视为失败
+                        has_warnings = any('警告:' in detail for detail in naming_result.details)
+                        if has_warnings and naming_result.passed:
+                            naming_result = ValidationResult(
+                                False, 
+                                naming_result.message.replace('通过', '严格模式失败'),
+                                naming_result.details
+                            )
+                    
+                    results[f'{module_name}_naming'] = naming_result
         
         return results
     
@@ -882,6 +1048,8 @@ def main():
     parser.add_argument("--project", type=str, help="生成项目路径")
     parser.add_argument("--batch-dir", type=str, help="批量验证目录")
     parser.add_argument("--idl-dir", type=str, help="IDL文件目录")
+    parser.add_argument("--check-naming", action="store_true", help="启用命名约定检查")
+    parser.add_argument("--strict-naming", action="store_true", help="严格命名约定检查（将警告视为错误）")
     
     args = parser.parse_args()
     
@@ -897,7 +1065,10 @@ def main():
             sys.exit(1)
         
         validator = SoloresModuleFunctionValidator(project_path)
-        results = validator.validate_project()
+        results = validator.validate_project(
+            check_naming=args.check_naming,
+            strict_naming=args.strict_naming
+        )
         validator.print_detailed_report(results)
         
         # 检查是否所有测试都通过
@@ -922,7 +1093,10 @@ def main():
                 log_info(f"验证项目: {project_dir.name}")
                 
                 validator = SoloresModuleFunctionValidator(project_dir)
-                results = validator.validate_project()
+                results = validator.validate_project(
+                    check_naming=args.check_naming,
+                    strict_naming=args.strict_naming
+                )
                 
                 all_passed = all(result.passed for result in results.values())
                 if all_passed:

@@ -274,9 +274,228 @@ pub fn generate_pubkey_serde_attr() -> TokenStream {
     }
 }
 
+/// 为大数组类型生成条件编译的 serde 序列化属性
+/// 
+/// 对于大于32的数组，使用 serde_big_array::BigArray 进行序列化
+/// 
+/// # Arguments
+/// * `array_size` - 数组长度
+/// 
+/// # Returns
+/// * `Option<TokenStream>` - 如果需要特殊处理则返回 serde 属性代码，否则返回 None
+pub fn generate_large_array_serde_attr(array_size: usize) -> Option<TokenStream> {
+    if array_size > 32 {
+        Some(quote! {
+            #[cfg_attr(
+                feature = "serde",
+                serde(with = "BigArray")
+            )]
+        })
+    } else {
+        None
+    }
+}
+
+/// 为 serde_big_array 生成条件编译的导入语句
+/// 
+/// # Returns
+/// * `TokenStream` - 生成的条件导入代码
+pub fn generate_big_array_import() -> TokenStream {
+    quote! {
+        #[cfg(feature = "serde")]
+        use serde_big_array::BigArray;
+    }
+}
+
+/// 为 Pubkey 数组生成适当的 serde 属性
+/// 同时处理大数组和 Pubkey 类型的序列化需求
+pub fn generate_pubkey_array_serde_attr(array_size: usize, is_pubkey: bool) -> Option<TokenStream> {
+    match (array_size > 32, is_pubkey) {
+        (true, true) => {
+            // 大的 Pubkey 数组：使用更简单的方案，直接转为 Vec<String>
+            Some(quote! {
+                #[cfg_attr(
+                    feature = "serde",
+                    serde(
+                        serialize_with = "serialize_pubkey_array_as_strings",
+                        deserialize_with = "deserialize_pubkey_array_from_strings"
+                    )
+                )]
+            })
+        },
+        (true, false) => {
+            // 大的非 Pubkey 数组只需要 BigArray
+            Some(quote! {
+                #[cfg_attr(
+                    feature = "serde",
+                    serde(with = "BigArray")
+                )]
+            })
+        },
+        (false, true) => {
+            // 小的 Pubkey 数组：使用 Vec<String> 方案
+            Some(quote! {
+                #[cfg_attr(
+                    feature = "serde",
+                    serde(
+                        serialize_with = "serialize_pubkey_array_as_strings",
+                        deserialize_with = "deserialize_pubkey_array_from_strings"
+                    )
+                )]
+            })
+        },
+        (false, false) => None,
+    }
+}
+
+/// 生成 Pubkey 数组序列化辅助函数
+pub fn generate_pubkey_array_serde_helpers() -> TokenStream {
+    quote! {
+        #[cfg(feature = "serde")]
+        mod pubkey_array_serde {
+            use super::*;
+            use serde::{Serializer, Deserializer, Serialize, Deserialize, ser::SerializeSeq, de::{SeqAccess, Visitor}};
+            use std::fmt;
+            
+            pub fn serialize_pubkey_array_as_strings<S, const N: usize>(
+                array: &[Pubkey; N],
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let strings: Vec<String> = array.iter().map(|pk| pk.to_string()).collect();
+                strings.serialize(serializer)
+            }
+            
+            pub fn deserialize_pubkey_array_from_strings<'de, D, const N: usize>(
+                deserializer: D,
+            ) -> Result<[Pubkey; N], D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let strings = Vec::<String>::deserialize(deserializer)?;
+                if strings.len() != N {
+                    return Err(serde::de::Error::invalid_length(
+                        strings.len(),
+                        &format!("exactly {} elements", N).as_str(),
+                    ));
+                }
+                
+                let mut pubkeys = Vec::with_capacity(N);
+                for s in strings {
+                    let pubkey = s.parse::<Pubkey>()
+                        .map_err(|e| serde::de::Error::custom(format!("Invalid Pubkey: {}", e)))?;
+                    pubkeys.push(pubkey);
+                }
+                
+                pubkeys.try_into().map_err(|_| {
+                    serde::de::Error::custom("Failed to convert Vec to array")
+                })
+            }
+        }
+        
+        #[cfg(feature = "serde")]
+        use pubkey_array_serde::{serialize_pubkey_array_as_strings, deserialize_pubkey_array_from_strings};
+    }
+}
+
 /// 检查字段类型是否为 Pubkey
 pub fn is_pubkey_type(type_str: &str) -> bool {
     matches!(type_str, "publicKey" | "pubkey" | "Pubkey")
+}
+
+/// 为 Option<Pubkey> 生成序列化属性
+pub fn generate_option_pubkey_serde_attr() -> TokenStream {
+    quote! {
+        #[cfg_attr(
+            feature = "serde",
+            serde(
+                serialize_with = "serialize_option_pubkey_as_string",
+                deserialize_with = "deserialize_option_pubkey_from_string"
+            )
+        )]
+    }
+}
+
+/// 生成 Option<Pubkey> 序列化辅助函数
+pub fn generate_option_pubkey_serde_helpers() -> TokenStream {
+    quote! {
+        #[cfg(feature = "serde")]
+        mod option_pubkey_serde {
+            use super::*;
+            use serde::{Serializer, Deserializer, Deserialize};
+            
+            pub fn serialize_option_pubkey_as_string<S>(
+                option_pubkey: &Option<Pubkey>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match option_pubkey {
+                    Some(pubkey) => serializer.serialize_some(&pubkey.to_string()),
+                    None => serializer.serialize_none(),
+                }
+            }
+            
+            pub fn deserialize_option_pubkey_from_string<'de, D>(
+                deserializer: D,
+            ) -> Result<Option<Pubkey>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let option_string = Option::<String>::deserialize(deserializer)?;
+                match option_string {
+                    Some(s) => {
+                        let pubkey = s.parse::<Pubkey>()
+                            .map_err(|e| serde::de::Error::custom(format!("Invalid Pubkey: {}", e)))?;
+                        Ok(Some(pubkey))
+                    }
+                    None => Ok(None),
+                }
+            }
+        }
+        
+        #[cfg(feature = "serde")]
+        use option_pubkey_serde::{serialize_option_pubkey_as_string, deserialize_option_pubkey_from_string};
+    }
+}
+
+/// 解析数组类型字符串获取数组大小
+/// 
+/// # Arguments
+/// * `type_str` - 数组类型字符串，如 "[u8; 64]"
+/// 
+/// # Returns
+/// * `Option<usize>` - 数组大小，如果解析失败则返回 None
+pub fn parse_array_size(type_str: &str) -> Option<usize> {
+    if type_str.starts_with('[') && type_str.ends_with(']') {
+        if let Some(inner) = type_str.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if let Some((_, size_str)) = inner.split_once("; ") {
+                return size_str.trim().parse().ok();
+            }
+        }
+    }
+    None
+}
+
+/// 检查字符串类型是否为 Pubkey 数组
+/// 
+/// # Arguments
+/// * `type_str` - 类型字符串，如 "[Pubkey; 8]" 或 "Pubkey"
+/// 
+/// # Returns
+/// * `bool` - 如果是 Pubkey 数组则返回 true
+pub fn is_pubkey_array_type(type_str: &str) -> bool {
+    if type_str.starts_with('[') && type_str.ends_with(']') {
+        if let Some(inner) = type_str.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if let Some((element_type, _)) = inner.split_once("; ") {
+                return is_pubkey_type(element_type.trim());
+            }
+        }
+    }
+    false
 }
 
 #[cfg(test)]
