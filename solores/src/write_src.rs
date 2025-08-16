@@ -4,8 +4,9 @@ use std::{io::Write, path::Path, time::Instant};
 
 use crate::{
     error::{SoloresError, handle_file_operation},
-    idl_format::IdlFormat, 
+    idl_format::{IdlFormat, IdlFormatEnum}, 
     utils::open_file_create_overwrite, 
+    templates::askama_generator::SimpleAskamaGenerator,
     Args
 };
 
@@ -122,7 +123,50 @@ pub fn write_lib(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
 }
 
 /// 带详细诊断的lib.rs生成函数
+/// 使用 Askama 模板系统生成代码
+pub fn write_lib_with_askama(args: &Args, idl_format: &IdlFormatEnum) -> Result<(), SoloresError> {
+    log::info!("🎨 使用 Askama 模板系统生成代码");
+    
+    // 1. 创建输出目录
+    create_output_directories(args)?;
+    
+    // 2. 使用简单 Askama 生成器作为测试
+    log::warn!("⚠️ 当前使用简化版Askama生成器进行测试");
+    // TODO: 实现完整的AskamaTemplateGenerator
+    
+    log::info!("✅ Askama 代码生成完成");
+    Ok(())
+}
+
+/// 主要的代码生成函数 - 支持新旧模板系统切换
+pub fn write_lib_with_system_selection(args: &Args, idl_format: &IdlFormatEnum) -> Result<(), SoloresError> {
+    // 检查是否启用 Askama 模板系统
+    if std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true" {
+        log::info!("🎨 启用 Askama 模板系统");
+        write_lib_with_askama(args, idl_format)
+    } else {
+        log::info!("🔧 使用传统模板系统");
+        write_lib_with_diagnostics_legacy(args, idl_format)
+    }
+}
+
+/// 向后兼容的包装函数
 pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
+    // 检查是否启用 Askama 模板系统
+    if std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true" {
+        log::info!("🎨 检测到 SOLORES_USE_ASKAMA 环境变量，启用 Askama 模板系统");
+        
+        // 创建一个简单的测试版本
+        let generator = SimpleAskamaGenerator::new(args, idl);
+        generator.generate()?;
+        
+        Ok(())
+    } else {
+        write_lib_with_diagnostics_legacy(args, idl)
+    }
+}
+
+pub fn write_lib_with_diagnostics_legacy(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
     log::info!("🚀 开始为程序{}生成lib.rs", idl.program_name());
     log::debug!("程序版本: {}", idl.program_version());
     

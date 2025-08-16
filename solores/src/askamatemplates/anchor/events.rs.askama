@@ -1,0 +1,22 @@
+//! {{ crate_name }} Events
+//! Anchor-style event structures
+
+use borsh::{BorshDeserialize, BorshSerialize};
+use solana_program::pubkey::Pubkey;
+
+{%- for event in events %}
+
+{%- if event.docs %}
+/// {{ event.docs }}
+{%- endif %}
+#[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+pub struct {{ event.name }} {
+    {%- for field in event.fields %}
+    {%- if field.docs %}
+    /// {{ field.docs }}
+    {%- endif %}
+    pub {{ field.name }}: {{ field.rust_type }},
+    {%- endfor %}
+}
+
+{%- endfor %}

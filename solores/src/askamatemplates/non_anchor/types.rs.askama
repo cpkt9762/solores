@@ -1,0 +1,27 @@
+//! {{ crate_name }} Types
+//! Non-Anchor style type definitions
+
+use borsh::{BorshDeserialize, BorshSerialize};
+
+{%- for type_def in types %}
+
+{%- if type_def.docs %}
+/// {{ type_def.docs }}
+{%- endif %}
+{%- if type_def.kind == "struct" %}
+#[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+pub struct {{ type_def.name }} {
+    {%- for field in type_def.fields %}
+    pub {{ field.name }}: {{ field.rust_type }},
+    {%- endfor %}
+}
+{%- else %}
+#[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+pub enum {{ type_def.name }} {
+    {%- for variant in type_def.variants %}
+    {{ variant.name }},
+    {%- endfor %}
+}
+{%- endif %}
+
+{%- endfor %}

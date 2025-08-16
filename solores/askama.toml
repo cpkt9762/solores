@@ -1,0 +1,8 @@
+[general]
+# 指定模板目录 (相对于当前包根目录)
+dirs = ["src/askamatemplates"]
+
+# 为生成Rust代码配置无转义escaper
+[[escaper]]
+path = "askama::Text"
+extensions = ["askama"]

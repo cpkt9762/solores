@@ -1,0 +1,25 @@
+//! {{ crate_name }} Parsers
+//! Non-Anchor style instruction and account parsers
+
+use crate::*;
+
+/// Parse instruction from instruction data and accounts
+pub fn parse_instruction(
+    instruction_data: &[u8],
+    accounts: &[solana_program::pubkey::Pubkey],
+) -> Result<Box<dyn std::fmt::Debug>, Box<dyn std::error::Error>> {
+    if instruction_data.is_empty() {
+        return Err("Insufficient instruction data".into());
+    }
+    
+    let discriminator = instruction_data[0];
+    
+    {%- for instruction in instructions %}
+    if discriminator == {{ instruction.name }}IxData::DISCRIMINATOR {
+        let ix_data = {{ instruction.name }}IxData::from_bytes(instruction_data)?;
+        return Ok(Box::new(ix_data));
+    }
+    {%- endfor %}
+    
+    Err("Unknown instruction discriminator".into())
+}

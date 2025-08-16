@@ -1,0 +1,9 @@
+[package]
+name = "{{ crate_name }}"
+version = "0.1.0"
+edition = "2021"
+description = "Generated Solana program interface for {{ crate_name }} (Non-Anchor)"
+
+[dependencies]
+borsh = "0.10"
+solana-program = "1.17"

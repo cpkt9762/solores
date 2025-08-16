@@ -13,6 +13,10 @@ pub mod template_adapter;
 pub mod boxed_template_adapter;
 pub mod unified_interface;
 pub mod field_analyzer;
+// Askama 模板系统
+pub mod askama_templates;
+pub mod askama_generator;
+pub mod filters;
 // pub mod data_adapters; // 已删除 - 使用极简二元架构
 
 // Re-export factory for convenient access

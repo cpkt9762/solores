@@ -1,0 +1,22 @@
+//! {{ crate_name }} Accounts
+//! Non-Anchor style account structures
+
+use borsh::{BorshDeserialize, BorshSerialize};
+use solana_program::pubkey::Pubkey;
+
+{%- for account in accounts %}
+
+{%- if account.docs %}
+/// {{ account.docs }}
+{%- endif %}
+#[derive(BorshDeserialize, BorshSerialize, Clone, Debug, PartialEq)]
+pub struct {{ account.name }} {
+    {%- for field in account.fields %}
+    {%- if field.docs %}
+    /// {{ field.docs }}
+    {%- endif %}
+    pub {{ field.name }}: {{ field.rust_type }},
+    {%- endfor %}
+}
+
+{%- endfor %}
