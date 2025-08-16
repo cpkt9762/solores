@@ -1,0 +1,46 @@
+use crate::{
+    Parser, ProgramParser, ParseResult, ParseError,
+    AccountUpdate, Prefilter,
+};
+
+// 引用生成的{{ display_name }}账户接口
+use {{ crate_name }}::{
+    parsers::accounts::{try_unpack_account, {{ account_type }}},
+    ID as {{ program_id_const }},
+};
+
+#[derive(Debug, Clone, Copy)]
+pub struct AccountParser;
+
+impl Parser for AccountParser {
+    type Input = AccountUpdate;
+    type Output = {{ account_type }};
+
+    fn id(&self) -> std::borrow::Cow<str> { "{{ display_name }}::AccountParser".into() }
+
+    fn prefilter(&self) -> Prefilter {
+        Prefilter::builder()
+            .account_owners([{{ program_id_const }}])
+            .build()
+            .unwrap()
+    }
+
+    async fn parse(&self, account_update: &AccountUpdate) -> ParseResult<Self::Output> {
+        if let Some(account) = &account_update.account {
+            if account.owner.as_slice() == {{ program_id_const }}.to_bytes() {
+                try_unpack_account(&account.data)
+                    .map_err(|e| ParseError::from(e.to_string()))
+            } else {
+                Err(ParseError::Filtered)
+            }
+        } else {
+            Err(ParseError::from("Account data is missing".to_string()))
+        }
+    }
+}
+
+impl ProgramParser for AccountParser {
+    fn program_id(&self) -> crate::Pubkey { 
+        {{ program_id_const }}.to_bytes().into() 
+    }
+}

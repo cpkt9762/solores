@@ -1,0 +1,63 @@
+[package]
+name = "sol_serum_interface"
+version = "0.0.0"
+edition = "2021"
+
+
+[dependencies.borsh]
+version = "^1.5"
+
+[dependencies.num-derive]
+version = "0.4.2"
+
+[dependencies.num-traits]
+version = "^0.2"
+
+[dependencies.serde]
+features = ["derive"]
+optional = true
+version = "^1.0"
+
+[dependencies.serde-big-array]
+optional = true
+version = "^0.5"
+
+[dependencies.serde_json]
+optional = true
+version = "^1.0"
+
+[dependencies.serde_with]
+optional = true
+version = "^3.0"
+
+[dependencies.solana-account-info]
+optional = true
+version = "2.3.0"
+
+[dependencies.solana-cpi]
+optional = true
+version = "2.2.1"
+
+[dependencies.solana-instruction]
+version = "2.3.0"
+
+[dependencies.solana-program-entrypoint]
+optional = true
+version = "2.3.0"
+
+[dependencies.solana-program-error]
+version = "2.2.2"
+
+[dependencies.solana-pubkey]
+features = ["borsh", "curve25519", "serde"]
+version = "2.4.0"
+
+[dependencies.thiserror]
+version = "^1.0"
+
+[features]
+account-info = ["dep:solana-account-info"]
+cpi = ["dep:solana-cpi"]
+full-solana = ["account-info", "program-entrypoint", "cpi"]
+program-entrypoint = ["dep:solana-program-entrypoint"]
+serde = ["dep:serde", "dep:serde_with", "dep:serde-big-array", "dep:serde_json"]

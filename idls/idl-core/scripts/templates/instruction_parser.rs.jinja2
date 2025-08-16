@@ -1,0 +1,49 @@
+use crate::{
+    Parser, ProgramParser, ParseResult, ParseError,
+    instruction::InstructionUpdate, Prefilter,
+};
+
+// 引用生成的{{ display_name }}接口
+use {{ crate_name }}::{
+    parsers::instructions::{parse_instruction, {{ instruction_type }}},
+    ID as {{ program_id_const }},
+};
+
+#[derive(Debug, Clone, Copy)]
+pub struct InstructionParser;
+
+impl Parser for InstructionParser {
+    type Input = InstructionUpdate;
+    type Output = {{ instruction_type }};
+
+    fn id(&self) -> std::borrow::Cow<str> { "{{ display_name }}::InstructionParser".into() }
+
+    fn prefilter(&self) -> Prefilter {
+        Prefilter::builder()
+            .transaction_accounts([{{ program_id_const }}])
+            .build()
+            .unwrap()
+    }
+
+    async fn parse(&self, ix_update: &InstructionUpdate) -> ParseResult<Self::Output> {
+        if ix_update.program.equals_ref({{ program_id_const }}.to_bytes()) {
+            // 转换账户格式
+            let accounts: Vec<solana_pubkey::Pubkey> = ix_update.accounts
+                .iter()
+                .map(|addr| solana_pubkey::Pubkey::try_from(addr.as_slice()).unwrap_or_default())
+                .collect();
+                
+            // 复用生成的解析函数
+            parse_instruction(&ix_update.data, &accounts)
+                .map_err(|e| ParseError::from(e.to_string()))
+        } else {
+            Err(ParseError::Filtered)
+        }
+    }
+}
+
+impl ProgramParser for InstructionParser {
+    fn program_id(&self) -> crate::Pubkey { 
+        {{ program_id_const }}.to_bytes().into() 
+    }
+}
