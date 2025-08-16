@@ -12,6 +12,17 @@ use crate::{
 
 const DEFAULT_PROGRAM_ID_STR: &str = "TH1S1SNoTAVAL1DPUBKEYDoNoTUSE11111111111111";
 
+/// 检查是否应该使用Askama模板系统
+fn should_use_askama(args: &Args) -> bool {
+    // CLI参数优先级最高
+    if args.use_askama {
+        return true;
+    }
+    
+    // 环境变量作为后备方式
+    std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true"
+}
+
 const MAX_BASE58_LEN: usize = 44;
 const PUBKEY_BYTES_SIZE: usize = 32;
 
@@ -153,13 +164,18 @@ pub fn write_lib_with_system_selection(args: &Args, idl_format: &IdlFormatEnum) 
 /// 向后兼容的包装函数
 pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
     // 检查是否启用 Askama 模板系统
-    if std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true" {
-        log::info!("🎨 检测到 SOLORES_USE_ASKAMA 环境变量，启用 Askama 模板系统");
+    if should_use_askama(args) {
+        if args.use_askama {
+            log::info!("🎨 通过 --use-askama 参数启用 Askama 模板系统");
+        } else {
+            log::info!("🎨 通过 SOLORES_USE_ASKAMA 环境变量启用 Askama 模板系统");
+        }
         
-        // 创建一个简单的测试版本
+        // 使用简单Askama生成器
         let generator = SimpleAskamaGenerator::new(args, idl);
         generator.generate()?;
         
+        log::info!("✅ Askama 模板系统生成完成");
         Ok(())
     } else {
         write_lib_with_diagnostics_legacy(args, idl)

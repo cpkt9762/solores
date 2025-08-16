@@ -10,6 +10,7 @@ use std::{
 
 use clap::{command, Parser};
 use idl_format::{IdlFormat, IdlFormatEnum, parse_idl_json};
+use regex::Regex;
 
 use crate::error::{SoloresError, diagnose_json_error, validate_idl_structure, format_user_error};
 
@@ -179,6 +180,26 @@ pub struct Args {
         default_value = "solana_workspace"
     )]
     pub workspace_name: String,
+
+    #[arg(
+        long,
+        help = "使用Askama模板系统生成代码（实验性功能）"
+    )]
+    pub use_askama: bool,
+
+    #[arg(
+        long,
+        help = "批量处理时排除的JSON文件名，支持通配符，多个用逗号分隔",
+        default_value = ""
+    )]
+    pub batch_exclude: String,
+
+    #[arg(
+        long,
+        help = "批量处理时仅包含的JSON文件名，支持通配符，多个用逗号分隔",
+        default_value = ""
+    )]
+    pub batch_include: String,
 }
 
 /// 获取用于错误显示的绝对路径字符串
@@ -419,6 +440,14 @@ fn process_batch(args: Args) {
     log::info!("🚀 启动批量处理模式");
     log::info!("📁 扫描目录: {}", args.idl_path.display());
     log::info!("📁 输出目录: {}", args.batch_output_dir.display());
+    
+    // 显示过滤器信息
+    if !args.batch_exclude.is_empty() {
+        log::info!("🚫 排除模式: {}", args.batch_exclude);
+    }
+    if !args.batch_include.is_empty() {
+        log::info!("✅ 包含模式: {}", args.batch_include);
+    }
 
     // Initialize workspace configuration if enabled
     let mut workspace_config = match validate_workspace_config(&args) {
@@ -439,14 +468,17 @@ fn process_batch(args: Args) {
         panic!("Failed to create batch output directory: {}", e);
     }
 
-    // Scan for IDL files
-    let idl_files = scan_idl_files(&args.idl_path);
+    // 扫描IDL文件并应用过滤器
+    let idl_files = scan_idl_files_with_filters(&args.idl_path, &args);
     if idl_files.is_empty() {
-        log::warn!("⚠️  在目录 {} 中未找到IDL文件", args.idl_path.display());
+        log::warn!("⚠️  在目录 {} 中未找到匹配的IDL文件", args.idl_path.display());
+        if !args.batch_exclude.is_empty() || !args.batch_include.is_empty() {
+            log::info!("💡 提示: 检查您的过滤模式是否正确");
+        }
         return;
     }
 
-    log::info!("📋 找到 {} 个IDL文件待处理", idl_files.len());
+    log::info!("📋 找到 {} 个IDL文件待处理（应用过滤器后）", idl_files.len());
 
     let mut success_count = 0;
     let mut failure_count = 0;
@@ -503,6 +535,74 @@ fn process_batch(args: Args) {
     }
     
     log::info!("📁 所有生成的库位于: {}", args.batch_output_dir.display());
+}
+
+/// 解析文件模式字符串
+fn parse_file_patterns(pattern_str: &str) -> Vec<String> {
+    if pattern_str.is_empty() {
+        return vec![];
+    }
+    
+    pattern_str.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// 检查文件名是否匹配模式
+fn filename_matches_pattern(filename: &str, pattern: &str) -> bool {
+    // 简单通配符匹配
+    if pattern.contains('*') {
+        // 转换为正则表达式
+        let regex_pattern = pattern.replace("*", ".*");
+        if let Ok(regex) = regex::Regex::new(&format!("^{}$", regex_pattern)) {
+            return regex.is_match(filename);
+        }
+    }
+    
+    // 精确匹配
+    filename == pattern
+}
+
+/// 扫描IDL文件并应用过滤器
+fn scan_idl_files_with_filters(dir_path: &PathBuf, args: &Args) -> Vec<PathBuf> {
+    let all_idl_files = scan_idl_files(dir_path);
+    
+    // 解析排除和包含模式
+    let exclude_patterns = parse_file_patterns(&args.batch_exclude);
+    let include_patterns = parse_file_patterns(&args.batch_include);
+    
+    // 应用过滤器
+    all_idl_files.into_iter().filter(|path| {
+        let filename = path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+            
+        // 检查排除模式
+        if !exclude_patterns.is_empty() {
+            for pattern in &exclude_patterns {
+                if filename_matches_pattern(filename, pattern) {
+                    log::debug!("🚫 排除文件: {} (匹配模式: {})", filename, pattern);
+                    return false;
+                }
+            }
+        }
+        
+        // 检查包含模式
+        if !include_patterns.is_empty() {
+            for pattern in &include_patterns {
+                if filename_matches_pattern(filename, pattern) {
+                    log::debug!("✅ 包含文件: {} (匹配模式: {})", filename, pattern);
+                    return true;
+                }
+            }
+            // 如果有包含模式但都不匹配，则排除
+            log::debug!("🚫 排除文件: {} (不匹配任何包含模式)", filename);
+            return false;
+        }
+        
+        true
+    }).collect()
 }
 
 /// Scan directory for IDL files
