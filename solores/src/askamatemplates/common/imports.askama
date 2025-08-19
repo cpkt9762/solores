@@ -1,8 +1,0 @@
-{# 公共导入语句模板 #}
-use borsh::{BorshDeserialize, BorshSerialize};
-use solana_program::pubkey::Pubkey;
-{%- for feature in features %}
-{%- if feature == "serde" %}
-use serde::{Deserialize, Serialize};
-{%- endif %}
-{%- endfor %}

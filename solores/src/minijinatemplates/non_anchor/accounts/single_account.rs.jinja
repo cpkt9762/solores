@@ -1,0 +1,35 @@
+//! {{ account.name }} Account
+//! Non-Anchor account structure for {{ crate_name }}
+
+{% if account.docs %}
+{{ account.docs | multiline_docs }}
+{% endif %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ account.name }} {
+    {% for field in account.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if field.rust_type == "solana_pubkey::Pubkey" %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+    {% endfor %}
+}
+
+impl {{ account.name }} {
+    /// Deserialize from bytes
+    pub fn from_bytes(data: &[u8]) -> std::result::Result<Self, std::io::Error> {
+        borsh::BorshDeserialize::deserialize(&mut data)
+    }
+    
+    /// Serialize to bytes
+    pub fn try_to_vec(&self) -> std::result::Result<std::vec::Vec<u8>, std::io::Error> {
+        borsh::to_vec(self)
+    }
+}

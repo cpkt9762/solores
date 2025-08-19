@@ -1,0 +1,82 @@
+//! {{ instruction.name }} Instruction
+//! Single instruction definition for {{ crate_name }}
+
+{% if instruction.docs %}
+{{ instruction.docs | multiline_docs }}
+{% endif %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ instruction.name }}IxData {
+    {% for field in instruction.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if field.is_pubkey %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type }},
+    {% endfor %}
+}
+
+impl {{ instruction.name }}IxData {
+    pub fn new(
+        {% for field in instruction.fields %}
+        {{ field.name | rust_field }}: {{ field.rust_type }},
+        {% endfor %}
+    ) -> Self {
+        Self {
+            {% for field in instruction.fields %}
+            {{ field.name | rust_field }},
+            {% endfor %}
+        }
+    }
+    
+    pub fn from_bytes(buf: &[u8]) -> std::io::Result<Self> {
+        borsh::BorshDeserialize::deserialize(&mut &buf[..])
+    }
+    
+    pub fn try_to_vec(&self) -> std::io::Result<std::vec::Vec<u8>> {
+        borsh::to_vec(self)
+    }
+}
+
+{% if instruction.accounts %}
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ instruction.name }}Keys {
+    {% for account in instruction.accounts %}
+    {% if account.docs %}
+    {{ account.docs | multiline_docs }}
+    {% endif %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    pub {{ account.name }}: solana_pubkey::Pubkey,
+    {% endfor %}
+}
+
+impl From<&[solana_pubkey::Pubkey]> for {{ instruction.name }}Keys {
+    fn from(pubkeys: &[solana_pubkey::Pubkey]) -> Self {
+        Self {
+            {% for account in instruction.accounts %}
+            {{ account.name }}: pubkeys[{{ loop.index0 }}],
+            {% endfor %}
+        }
+    }
+}
+
+impl {{ instruction.name }}Keys {
+    /// Convert Keys to Vec<Pubkey>
+    pub fn to_vec(&self) -> std::vec::Vec<solana_pubkey::Pubkey> {
+        std::vec![
+            {% for account in instruction.accounts %}
+            self.{{ account.name }},
+            {% endfor %}
+        ]
+    }
+}
+{% endif %}

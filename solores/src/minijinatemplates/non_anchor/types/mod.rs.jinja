@@ -1,0 +1,10 @@
+//! {{ module_name | title }} module
+//! Auto-generated {{ module_name }} definitions for {{ crate_name }}
+
+{% for item in items %}
+pub mod {{ item }};
+{% endfor %}
+
+{% for item in items %}
+pub use {{ item }}::*;
+{% endfor %}

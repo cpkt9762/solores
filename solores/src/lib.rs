@@ -3,14 +3,13 @@
 use std::{
     env,
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use clap::{command, Parser};
 use idl_format::{IdlFormat, IdlFormatEnum, parse_idl_json};
-use regex::Regex;
 
 use crate::error::{SoloresError, diagnose_json_error, validate_idl_structure, format_user_error};
 
@@ -181,11 +180,6 @@ pub struct Args {
     )]
     pub workspace_name: String,
 
-    #[arg(
-        long,
-        help = "使用Askama模板系统生成代码（实验性功能）"
-    )]
-    pub use_askama: bool,
 
     #[arg(
         long,
@@ -321,26 +315,23 @@ pub fn main() {
     if args.batch {
         process_batch(args);
     } else {
-        process_single_file(args);
+        if let Err(e) = process_single_file(args) {
+            log::error!("处理文件失败: {}", e);
+            std::process::exit(1);
+        }
     }
 }
 
 /// Process a single IDL file (original functionality)
-fn process_single_file(mut args: Args) {
-    let mut file = match OpenOptions::new().read(true).open(&args.idl_path) {
-        Ok(f) => f,
-        Err(e) => {
-            let error = SoloresError::file_operation_error(
-                "读取IDL文件",
-                get_absolute_path_for_error(&args.idl_path),
-                e
-            );
-            eprintln!("{}", format_user_error(&error));
-            std::process::exit(1);
-        }
-    };
+fn process_single_file(mut args: Args) -> Result<(), SoloresError> {
+    let mut file = OpenOptions::new().read(true).open(&args.idl_path)
+        .map_err(|e| SoloresError::file_operation_error(
+            "读取IDL文件",
+            get_absolute_path_for_error(&args.idl_path),
+            e
+        ))?;
 
-    let idl = load_idl(&mut file);
+    let idl = load_idl_with_diagnostics(&mut file)?;
 
     if args.output_crate_name == DEFAULT_OUTPUT_CRATE_NAME_MSG {
         args.output_crate_name = format!("sol_{}_interface", idl.program_name());
@@ -355,26 +346,47 @@ fn process_single_file(mut args: Args) {
     });
 
     args.output_dir.push(&args.output_crate_name);
-    fs::create_dir_all(args.output_dir.join("src/")).unwrap();
+    fs::create_dir_all(args.output_dir.join("src/")).map_err(|e| SoloresError::file_operation_error(
+        "创建输出目录",
+        args.output_dir.display().to_string(),
+        e
+    ))?;
 
     // TODO: multithread, 1 thread per generated file
-    write_gitignore(&args).unwrap();
+    write_gitignore(&args).map_err(|e| SoloresError::file_operation_error(
+        "创建.gitignore文件",
+        args.output_dir.join(".gitignore").display().to_string(),
+        e
+    ))?;
     
     // Choose appropriate Cargo.toml generation based on workspace mode
     if should_use_workspace_cargo_toml(&args) {
-        write_workspace_member_cargo_toml(&args, idl.as_ref()).unwrap();
+        write_workspace_member_cargo_toml(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
+            "创建workspace Cargo.toml文件",
+            args.output_dir.join("Cargo.toml").display().to_string(),
+            e
+        ))?;
     } else {
-        write_fine_grained_cargo_toml(&args, idl.as_ref()).unwrap();
+        write_fine_grained_cargo_toml(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
+            "创建Cargo.toml文件",
+            args.output_dir.join("Cargo.toml").display().to_string(),
+            e
+        ))?;
     }
     
+    // 调用 write_lib，内部会根据配置选择合适的模板系统
     log::info!("Writing lib.rs for IDL: {}", idl.program_name());
     log::debug!("IDL address: {:?}", idl.program_address());
-    write_lib(&args, idl.as_ref())
-        .unwrap_or_else(|e| {
-            log::error!("Failed to write lib.rs: {}", e);
-            panic!("write_lib failed: {}", e);
-        });
-    write_readme(&args, idl.as_ref()).unwrap();
+    write_lib(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
+        "创建lib.rs文件",
+        args.output_dir.join("src/lib.rs").display().to_string(),
+        e
+    ))?;
+    write_readme(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
+        "创建README.md文件",
+        args.output_dir.join("README.md").display().to_string(),
+        e
+    ))?;
     
     // Copy IDL file to output directory
     let idl_dest = args.output_dir.join("idl.json");
@@ -384,48 +396,16 @@ fn process_single_file(mut args: Args) {
         log::info!("IDL file copied to {}", idl_dest.display());
     }
     
-    // Format generated code with cargo fmt
-    log::debug!("🎨 准备运行cargo fmt...");
+    // Format generated code with prettyplease
+    log::debug!("🎨 使用prettyplease格式化生成的代码...");
     
-    // 检查格式化前的一个样本文件
-    let sample_instruction_file = args.output_dir.join("src/instructions").join("create_platform_config.rs");
-    let use_count_before = if sample_instruction_file.exists() {
-        let content = std::fs::read_to_string(&sample_instruction_file).unwrap_or_default();
-        content.matches("use crate::*").count()
+    // 格式化所有生成的Rust文件
+    let src_dir = args.output_dir.join("src");
+    if src_dir.exists() {
+        format_rust_files_with_prettyplease(&src_dir)?;
+        log::info!("✅ 代码格式化完成 (prettyplease)");
     } else {
-        0
-    };
-    log::debug!("🎨 格式化前样本文件 use crate::* 数量: {}", use_count_before);
-    
-    let fmt_result = Command::new("cargo")
-        .args(&["fmt"])
-        .current_dir(&args.output_dir)
-        .output();
-
-    match fmt_result {
-        Ok(output) => {
-            if output.status.success() {
-                // 检查格式化后的同一个样本文件
-                let use_count_after = if sample_instruction_file.exists() {
-                    let content = std::fs::read_to_string(&sample_instruction_file).unwrap_or_default();
-                    content.matches("use crate::*").count()
-                } else {
-                    0
-                };
-                log::debug!("🎨 格式化后样本文件 use crate::* 数量: {}", use_count_after);
-                
-                if use_count_before != use_count_after {
-                    log::warn!("⚠️ cargo fmt改变了导入数量！前: {}, 后: {}", use_count_before, use_count_after);
-                }
-                
-                log::info!("Code formatted successfully with cargo fmt");
-            } else {
-                log::warn!("cargo fmt failed: {}", String::from_utf8_lossy(&output.stderr));
-            }
-        }
-        Err(e) => {
-            log::warn!("Failed to run cargo fmt: {}", e);
-        }
+        log::warn!("⚠️ src目录不存在，跳过格式化");
     }
     
     log::info!(
@@ -433,6 +413,8 @@ fn process_single_file(mut args: Args) {
         args.output_crate_name,
         args.output_dir.to_string_lossy()
     );
+    
+    Ok(())
 }
 
 /// Process multiple IDL files in batch mode
@@ -848,4 +830,81 @@ fn get_missing_field_suggestion(field_name: &str) -> String {
         "metadata" => "Anchor IDL需要metadata对象，其中应包含name和version等信息。".to_string(),
         _ => format!("请检查IDL格式规范，确保包含必需的{}字段。", field_name),
     }
+}
+
+/// 使用prettyplease格式化目录中的所有Rust文件
+fn format_rust_files_with_prettyplease(dir: &Path) -> Result<(), SoloresError> {
+    use std::fs;
+    
+    let entries = fs::read_dir(dir).map_err(|e| SoloresError::FileOperationError {
+        operation: "读取目录".to_string(),
+        path: dir.display().to_string(),
+        current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+        resolved_path: None,
+        source: e,
+        suggestion: Some("检查目录权限".to_string()),
+    })?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| SoloresError::FileOperationError {
+            operation: "读取目录项".to_string(),
+            path: dir.display().to_string(),
+            current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+            resolved_path: None,
+            source: e,
+            suggestion: Some("检查目录权限".to_string()),
+        })?;
+
+        let path = entry.path();
+        
+        if path.is_dir() {
+            // 递归处理子目录
+            format_rust_files_with_prettyplease(&path)?;
+        } else if path.extension().map_or(false, |ext| ext == "rs") {
+            // 格式化Rust文件
+            format_single_rust_file(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// 使用prettyplease格式化单个Rust文件
+fn format_single_rust_file(file_path: &Path) -> Result<(), SoloresError> {
+    use std::fs;
+    
+    // 读取文件内容
+    let content = fs::read_to_string(file_path).map_err(|e| SoloresError::FileOperationError {
+        operation: "读取文件".to_string(),
+        path: file_path.display().to_string(),
+        current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+        resolved_path: None,
+        source: e,
+        suggestion: Some("检查文件权限".to_string()),
+    })?;
+
+    // 解析为语法树
+    match syn::parse_file(&content) {
+        Ok(syntax_tree) => {
+            // 使用prettyplease格式化
+            let formatted = prettyplease::unparse(&syntax_tree);
+            
+            // 写回文件
+            fs::write(file_path, formatted).map_err(|e| SoloresError::FileOperationError {
+                operation: "写入格式化文件".to_string(),
+                path: file_path.display().to_string(),
+                current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+                resolved_path: None,
+                source: e,
+                suggestion: Some("检查文件权限".to_string()),
+            })?;
+            
+            log::debug!("✅ 格式化完成: {}", file_path.display());
+        }
+        Err(e) => {
+            log::warn!("⚠️ 跳过格式化 {} (语法错误): {}", file_path.display(), e);
+        }
+    }
+
+    Ok(())
 }

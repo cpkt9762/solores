@@ -32,7 +32,8 @@ name = "solores"
 name = "solores"
 
 [dependencies]
-askama = { version = "0.12.1" }
+minijinja = { version = "2.11.0", features = ["loader"] }
+const-str = "0.5"
 bs58 = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 convert_case = "0.6"

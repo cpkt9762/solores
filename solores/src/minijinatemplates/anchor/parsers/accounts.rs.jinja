@@ -1,0 +1,20 @@
+//! {{ crate_name }} Account Parsers
+//! Anchor-style account parsing with discriminator support
+{% if accounts %}
+/// Parse account from account data
+pub fn parse_account(account_data: &[u8]) -> std::result::Result<std::boxed::Box<dyn std::fmt::Debug>, std::boxed::Box<dyn std::error::Error>> {
+    if account_data.len() < 8 {
+        return Err("Insufficient account data".into());
+    }
+    let discriminator = &account_data[0..8];
+    {% for account in accounts %}
+    {% if account.discriminator %}
+    if discriminator == {{ account.name }}::DISCRIMINATOR {
+        let account = {{ account.name }}::from_bytes(account_data)?;
+        return std::result::Result::Ok(std::boxed::Box::new(account));
+    }
+    {% endif %}
+    {% endfor %}
+    Err("Unknown account discriminator".into())
+}
+{% endif %}

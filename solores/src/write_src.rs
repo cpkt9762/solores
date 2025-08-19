@@ -6,22 +6,31 @@ use crate::{
     error::{SoloresError, handle_file_operation},
     idl_format::{IdlFormat, IdlFormatEnum}, 
     utils::open_file_create_overwrite, 
-    templates::askama_generator::SimpleAskamaGenerator,
     Args
 };
 
 const DEFAULT_PROGRAM_ID_STR: &str = "TH1S1SNoTAVAL1DPUBKEYDoNoTUSE11111111111111";
 
 /// 检查是否应该使用Askama模板系统
-fn should_use_askama(args: &Args) -> bool {
-    // CLI参数优先级最高
-    if args.use_askama {
+
+/// 检查是否应该使用MiniJinja模板系统
+fn should_use_minijinja(args: &Args) -> bool {
+    // CLI参数优先级最高（将来可能添加）
+    // if args.use_minijinja {
+    //     log::info!("🔧 通过 --use-minijinja 参数启用 MiniJinja 模板系统");
+    //     return true;
+    // }
+    
+    // 环境变量检查
+    if std::env::var("SOLORES_USE_MINIJINJA").unwrap_or_default() == "true" {
+        log::info!("🔧 通过 SOLORES_USE_MINIJINJA 环境变量启用 MiniJinja 模板系统");
         return true;
     }
     
-    // 环境变量作为后备方式
-    std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true"
+    log::debug!("🔧 未启用 MiniJinja 模板系统");
+    false
 }
+
 
 const MAX_BASE58_LEN: usize = 44;
 const PUBKEY_BYTES_SIZE: usize = 32;
@@ -133,54 +142,88 @@ pub fn write_lib(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
     }
 }
 
-/// 带详细诊断的lib.rs生成函数
-/// 使用 Askama 模板系统生成代码
-pub fn write_lib_with_askama(args: &Args, idl_format: &IdlFormatEnum) -> Result<(), SoloresError> {
-    log::info!("🎨 使用 Askama 模板系统生成代码");
+
+/// 使用 MiniJinja 模板系统生成代码
+pub fn write_lib_with_minijinja(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
+    log::info!("🔧 使用 MiniJinja 模板系统生成代码");
     
-    // 1. 创建输出目录
-    create_output_directories(args)?;
+    // 通过重新解析 IDL 文件来获取完整数据
+    let idl_format = convert_dyn_idl_to_enum_with_reparse(args)?;
     
-    // 2. 使用简单 Askama 生成器作为测试
-    log::warn!("⚠️ 当前使用简化版Askama生成器进行测试");
-    // TODO: 实现完整的AskamaTemplateGenerator
+    // 创建 MiniJinja 模板生成器
+    let mut generator = crate::templates::minijinja_generator::MinijinjaTemplateGenerator::new(idl_format)?;
     
-    log::info!("✅ Askama 代码生成完成");
+    // 生成多文件架构
+    generator.generate_multi_file_structure(
+        &args.output_dir,
+        args.generate_to_json, // 使用generate_to_json作为serde特性标志
+        args.generate_parser,
+    )?;
+    
+    // 复制IDL文件到输出目录
+    if let Ok(content) = std::fs::read_to_string(&args.idl_path) {
+        let idl_output_path = args.output_dir.join("idl.json");
+        std::fs::write(&idl_output_path, content).map_err(|e| SoloresError::FileOperationError {
+            operation: "copy IDL file".to_string(),
+            path: idl_output_path.display().to_string(),
+            current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+            resolved_path: None,
+            source: e,
+            suggestion: Some("检查目录权限".to_string()),
+        })?;
+    }
+    
+    log::info!("✅ MiniJinja 代码生成完成");
     Ok(())
 }
 
-/// 主要的代码生成函数 - 支持新旧模板系统切换
-pub fn write_lib_with_system_selection(args: &Args, idl_format: &IdlFormatEnum) -> Result<(), SoloresError> {
-    // 检查是否启用 Askama 模板系统
-    if std::env::var("SOLORES_USE_ASKAMA").unwrap_or_default() == "true" {
-        log::info!("🎨 启用 Askama 模板系统");
-        write_lib_with_askama(args, idl_format)
-    } else {
-        log::info!("🔧 使用传统模板系统");
-        write_lib_with_diagnostics_legacy(args, idl_format)
-    }
-}
 
 /// 向后兼容的包装函数
 pub fn write_lib_with_diagnostics(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
-    // 检查是否启用 Askama 模板系统
-    if should_use_askama(args) {
-        if args.use_askama {
-            log::info!("🎨 通过 --use-askama 参数启用 Askama 模板系统");
-        } else {
-            log::info!("🎨 通过 SOLORES_USE_ASKAMA 环境变量启用 Askama 模板系统");
-        }
-        
-        // 使用简单Askama生成器
-        let generator = SimpleAskamaGenerator::new(args, idl);
-        generator.generate()?;
-        
-        log::info!("✅ Askama 模板系统生成完成");
-        Ok(())
+    // 优先级：MiniJinja > 传统系统
+    if should_use_minijinja(args) {
+        log::info!("🔧 启用 MiniJinja 模板系统 - 现代化多文件生成");
+        write_lib_with_minijinja(args, idl)
     } else {
+        log::info!("🔧 使用传统模板系统");
         write_lib_with_diagnostics_legacy(args, idl)
     }
 }
+
+/// 将 dyn IdlFormat 转换为 IdlFormatEnum
+/// 通过重新解析 IDL 文件来获取完整数据
+fn convert_dyn_idl_to_enum_with_reparse(args: &Args) -> Result<IdlFormatEnum, SoloresError> {
+    log::debug!("通过重新解析 IDL 文件获取完整数据");
+    
+    // 重新读取和解析 IDL 文件
+    let content = std::fs::read_to_string(&args.idl_path)
+        .map_err(|e| SoloresError::FileOperationError {
+            operation: "read IDL file for template system".to_string(),
+            path: args.idl_path.to_string_lossy().to_string(),
+            current_dir: std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string()),
+            resolved_path: Some(args.idl_path.to_string_lossy().to_string()),
+            source: e,
+            suggestion: Some("检查文件路径是否正确并且文件可读".to_string()),
+        })?;
+    
+    // 使用新的解析器直接获取 IdlFormatEnum
+    match crate::idl_format::parse_idl_json(&content) {
+        Ok(idl_format) => {
+            log::info!("✅ 成功重新解析 IDL 文件用于模板系统");
+            Ok(idl_format)
+        }
+        Err(e) => {
+            log::error!("❌ 重新解析 IDL 文件失败: {}", e);
+            Err(SoloresError::IdlParseError {
+                message: format!("Failed to parse IDL for Askama: {}", e),
+                line: None,
+                column: None,
+                file_path: Some(args.idl_path.clone()),
+            })
+        }
+    }
+}
+
 
 pub fn write_lib_with_diagnostics_legacy(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
     log::info!("🚀 开始为程序{}生成lib.rs", idl.program_name());

@@ -74,6 +74,13 @@ pub enum SoloresError {
         location: String,
         suggestion: String,
     },
+    
+    #[error("Template rendering failed: {message}")]
+    TemplateError {
+        message: String,
+        template_name: Option<String>,
+        context: Option<String>,
+    },
 }
 
 impl SoloresError {
@@ -139,6 +146,27 @@ impl SoloresError {
             _ => {}
         }
         self
+    }
+    
+    /// 创建模板错误
+    pub fn template_error(message: impl Into<String>) -> Self {
+        Self::TemplateError {
+            message: message.into(),
+            template_name: None,
+            context: None,
+        }
+    }
+    
+    /// 创建带模板名称的模板错误
+    pub fn template_error_with_name(
+        message: impl Into<String>,
+        template_name: impl Into<String>
+    ) -> Self {
+        Self::TemplateError {
+            message: message.into(),
+            template_name: Some(template_name.into()),
+            context: None,
+        }
     }
 }
 
@@ -327,6 +355,21 @@ pub fn format_user_error(error: &SoloresError) -> String {
         SoloresError::DuplicateFieldError { field, location, suggestion } => {
             format!("❌ 重复字段错误:\n字段: {}\n位置: {}\n💡 建议: {}", 
                 field, location, suggestion)
+        }
+        
+        SoloresError::TemplateError { message, template_name, context } => {
+            let mut output = format!("❌ 模板渲染失败:\n{}", message);
+            
+            if let Some(name) = template_name {
+                output.push_str(&format!("\n📄 模板: {}", name));
+            }
+            
+            if let Some(ctx) = context {
+                output.push_str(&format!("\n📝 上下文: {}", ctx));
+            }
+            
+            output.push_str("\n💡 建议: 请检查模板语法和数据类型是否正确");
+            output
         }
         
         _ => format!("❌ 错误: {}", error)

@@ -1,0 +1,15 @@
+[package]
+name = "idl-traits-derive"
+version = "0.1.0"
+edition = "2021"
+description = "派生宏库，为 idl-traits 提供自动实现"
+authors = ["Solana Arbitrage Team"]
+license = "MIT"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "derive", "parsing"] }

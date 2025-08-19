@@ -1,0 +1,51 @@
+//! {{ type_def.name }} Type
+//! Single type definition for {{ crate_name }}
+
+{% if type_def.docs %}
+{{ type_def.docs | multiline_docs }}
+{% endif %}
+{% if type_def.kind == "struct" %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ type_def.name }} {
+    {% for field in type_def.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if field.is_pubkey %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type }},
+    {% endfor %}
+}
+{% else %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug, PartialEq)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub enum {{ type_def.name }} {
+    {% for variant in type_def.variants %}
+    {% if variant.docs %}
+    {{ variant.docs | multiline_docs }}
+    {% endif %}
+    {% if variant.fields %}
+    {{ variant.name }} {
+        {% for field in variant.fields %}
+        {% if field.is_pubkey %}
+        #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+        {% elif field.is_big_array %}
+        #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+        {% endif %}
+        {{ field.name }}: {{ field.rust_type }},
+        {% endfor %}
+    },
+    {% else %}
+    {{ variant.name }},
+    {% endif %}
+    {% endfor %}
+}
+{% endif %}

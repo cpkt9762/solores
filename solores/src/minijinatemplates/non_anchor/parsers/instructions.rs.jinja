@@ -1,0 +1,57 @@
+//! {{ crate_name }} Instruction Parsers
+//! Non-Anchor style instruction parsing
+
+/// Program instruction types for Non-Anchor contract
+#[derive(Clone, Debug, PartialEq)]
+pub enum {{ program_name }}Instruction {
+    {% for instruction in instructions %}
+    {% if instruction.docs %}
+    {{ instruction.docs | multiline_docs }}
+    {% endif %}
+    {% if instruction.accounts %}
+    {{ instruction.name }}({{ instruction.name }}Keys, {{ instruction.name }}IxData),
+    {% else %}
+    {{ instruction.name }}({{ instruction.name }}IxData),
+    {% endif %}
+    {% endfor %}
+}
+
+impl {{ program_name }}Instruction {
+    /// Parse instruction from instruction data and accounts
+    pub fn from_bytes(
+        instruction_data: &[u8],
+        accounts: &[solana_pubkey::Pubkey],
+    ) -> std::result::Result<Self, std::boxed::Box<dyn std::error::Error>> {
+        if instruction_data.is_empty() {
+            return Err("Empty instruction data".into());
+        }
+        
+        // Non-Anchor programs typically use first byte as instruction type
+        let instruction_type = instruction_data[0];
+        {% for instruction in instructions %}
+        {% set loop_index = loop.index0 %}
+        if instruction_type == {{ loop_index }} {
+            let ix_data = {{ instruction.name }}IxData::from_bytes(instruction_data)?;
+            {% if instruction.accounts %}
+            if accounts.len() < {{ instruction.accounts|length }} {
+                return Err("Insufficient accounts for {{ instruction.name }}".into());
+            }
+            let keys = {{ instruction.name }}Keys::from(&accounts[..{{ instruction.accounts|length }}]);
+            return std::result::Result::Ok(Self::{{ instruction.name }}(keys, ix_data));
+            {% else %}
+            return std::result::Result::Ok(Self::{{ instruction.name }}(ix_data));
+            {% endif %}
+        }
+        {% endfor %}
+        Err("Unknown instruction type".into())
+    }
+
+}
+
+/// Parse instruction from instruction data and accounts
+pub fn parse_instruction(
+    instruction_data: &[u8],
+    accounts: &[solana_pubkey::Pubkey],
+) -> std::result::Result<{{ program_name }}Instruction, std::boxed::Box<dyn std::error::Error>> {
+    {{ program_name }}Instruction::from_bytes(instruction_data, accounts)
+}

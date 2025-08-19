@@ -1,0 +1,29 @@
+[package]
+name = "idl-traits"
+version = "0.1.0"
+edition = "2021"
+description = "共享 trait 定义和派生宏，用于 IDL 生成的解析器接口"
+authors = ["Solana Arbitrage Team"]
+license = "MIT"
+
+# 这不是 proc-macro 库，而是 trait 定义库
+# proc-macro 功能在 idl-traits-derive 中提供
+
+[dependencies]
+# 错误处理
+error-stack = "0.4"
+thiserror = "^1.0"
+
+# 序列化
+borsh = "^1.5"
+serde = { version = "^1.0", features = ["derive"], optional = true }
+
+# Solana 核心
+solana-pubkey = { version = "2.4.0", features = ["borsh"] }
+
+# 派生宏库依赖
+idl-traits-derive = { path = "../idl-traits-derive" }
+
+[features]
+default = []
+serde = ["dep:serde"]
