@@ -73,6 +73,24 @@ class SoloresWrapper:
             log_warn("Cargo.toml已更新，需要重新构建")
             return True
         
+        # 检查 MiniJinja 模板文件
+        minijinja_templates = self.src_dir / "minijinja" / "templates"
+        if minijinja_templates.exists():
+            for template_file in minijinja_templates.rglob("*.jinja"):
+                if template_file.stat().st_mtime > binary_mtime:
+                    log_warn(f"MiniJinja模板已更新: {template_file.relative_to(self.project_root)}")
+                    log_warn(f"  文件时间: {datetime.fromtimestamp(template_file.stat().st_mtime)}")
+                    return True
+
+        # 检查传统模板文件
+        traditional_templates = self.src_dir / "templates"
+        if traditional_templates.exists():
+            for template_file in traditional_templates.rglob("*.rs"):
+                if template_file.stat().st_mtime > binary_mtime:
+                    log_warn(f"传统模板已更新: {template_file.relative_to(self.project_root)}")
+                    log_warn(f"  文件时间: {datetime.fromtimestamp(template_file.stat().st_mtime)}")
+                    return True
+        
         return False
     
     def auto_build(self) -> bool:

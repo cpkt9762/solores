@@ -143,8 +143,8 @@ pub fn write_workspace_cargo_toml(config: &WorkspaceConfig) -> Result<(), Solore
 pub fn generate_member_cargo_toml(
     crate_name: &str,
     program_id: &str,
-    generate_parser: bool,
-    test: bool,
+    _generate_parser: bool,
+    _test: bool,
     zero_copy: &[String],
 ) -> String {
     // Determine required features

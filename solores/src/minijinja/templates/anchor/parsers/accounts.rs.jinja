@@ -1,0 +1,61 @@
+//! {{ crate_name }} Account Parsers
+//! Anchor-style account parsing with discriminator support
+
+{% if accounts and accounts|length > 0 %}
+//! Account parser for Anchor contracts with 8-byte discriminators
+use crate::errors::AccountParseError;
+
+/// Program account types
+#[derive(Clone, Debug)]
+pub enum ProgramAccount {
+{% for account in accounts %}
+    {{ account.name }}(crate::accounts::{{ account.name }}),
+{% endfor %}
+}
+
+impl ProgramAccount {
+    /// Try to parse account data into one of the known account types
+    pub fn try_parse(data: &[u8]) -> Result<Self, AccountParseError> {
+{% for account in accounts %}
+        match crate::accounts::{{ account.name }}::from_bytes(data) {
+            Ok(account) => return Ok(ProgramAccount::{{ account.name }}(account)),
+            Err(AccountParseError::DiscriminatorMismatch { .. }) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+{% endfor %}
+        Err(AccountParseError::DeserializationFailed(
+            "Unable to parse account data into any known account type".to_string()
+        ))
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::AccountParser".into()
+    }
+}
+{% else %}
+//! No accounts defined in this program
+use crate::errors::AccountParseError;
+
+/// Program account types (empty)
+#[derive(Clone, Debug)]
+pub enum ProgramAccount {
+    // No accounts defined in this program
+}
+
+impl ProgramAccount {
+    /// Try to parse account data (always fails for empty accounts)
+    pub fn try_parse(_data: &[u8]) -> Result<Self, AccountParseError> {
+        Err(AccountParseError::DeserializationFailed(
+            "{{ crate_name }}::No accounts defined in this program".to_string()
+        ))
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::AccountParser".into()
+    }
+}
+{% endif %}

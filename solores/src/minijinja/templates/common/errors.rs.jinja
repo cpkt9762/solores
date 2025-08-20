@@ -1,0 +1,76 @@
+//! {{ crate_name }} Errors
+//! Error types for the interface
+
+use thiserror::Error;
+
+/// General interface errors
+#[derive(Error, Debug)]
+pub enum InterfaceError {
+    #[error("IDL parsing error: {0}")]
+    IdlParsingError(String),
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+    #[error("Invalid data: {0}")]
+    InvalidData(String),
+}
+
+/// Account parsing error types
+#[derive(Error, Clone, Debug)]
+pub enum AccountParseError {
+    #[error("Discriminator mismatch. Expected: {expected:?}, found: {found:?}")]
+    DiscriminatorMismatch { expected: [u8; 8], found: [u8; 8] },
+    
+    #[error("Account data too short. Expected at least {expected} bytes, got: {found}")]
+    DataTooShort { expected: usize, found: usize },
+    
+    #[error("Account data length mismatch. Expected: {expected}, got: {found}")]
+    IncorrectLength { expected: usize, found: usize },
+    
+    #[error("Failed to deserialize account data: {0}")]
+    DeserializationFailed(String),
+}
+
+/// Instruction parsing error types
+#[derive(Error, Clone, Debug)]
+pub enum InstructionParseError {
+    #[error("Discriminator mismatch. Expected: {expected:?}, found: {found:?}")]
+    DiscriminatorMismatch { expected: [u8; 8], found: [u8; 8] },
+    
+    #[error("Instruction data too short. Expected at least {expected} bytes, got: {found}")]
+    DataTooShort { expected: usize, found: usize },
+    
+    #[error("Failed to deserialize instruction data: {0}")]
+    DeserializationFailed(String),
+}
+
+/// Event parsing error types
+#[derive(Error, Clone, Debug)]
+pub enum EventParseError {
+    #[error("Discriminator mismatch. Expected: {expected:?}, found: {found:?}")]
+    DiscriminatorMismatch { expected: [u8; 8], found: [u8; 8] },
+    
+    #[error("Event data too short. Expected at least {expected} bytes, got: {found}")]
+    DataTooShort { expected: usize, found: usize },
+    
+    #[error("Failed to deserialize event data: {0}")]
+    DeserializationFailed(String),
+}
+
+// Conversion implementations for std::io::Error compatibility
+impl From<AccountParseError> for std::io::Error {
+    fn from(err: AccountParseError) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    }
+}
+
+impl From<InstructionParseError> for std::io::Error {
+    fn from(err: InstructionParseError) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    }
+}
+
+impl From<EventParseError> for std::io::Error {
+    fn from(err: EventParseError) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    }
+}

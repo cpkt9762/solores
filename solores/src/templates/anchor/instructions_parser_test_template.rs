@@ -9,7 +9,6 @@ use heck::ToShoutySnakeCase;
 
 use crate::idl_format::anchor_idl::AnchorInstruction;
 use crate::templates::{InstructionsParserTestGenerator, TemplateGenerator};
-use crate::templates::common::doc_generator::DocGenerator;
 
 /// Anchor Instructions Parser 测试模板
 pub struct AnchorInstructionsParserTestTemplate;
@@ -41,7 +40,7 @@ impl InstructionsParserTestGenerator for AnchorInstructionsParserTestTemplate {
             let variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             let keys_struct_name = syn::Ident::new(&format!("{}Keys", ix.name.to_case(Case::Pascal)), proc_macro2::Span::call_site());
             let accounts_len_const = syn::Ident::new(&format!("{}_IX_ACCOUNTS_LEN", ix.name.to_shouty_snake_case()), proc_macro2::Span::call_site());
-            let discm_const_name = syn::Ident::new(
+            let _discm_const_name = syn::Ident::new(
                 &format!("{}_IX_DISCM", ix.name.to_shouty_snake_case()),
                 proc_macro2::Span::call_site(),
             );
@@ -89,8 +88,8 @@ impl InstructionsParserTestGenerator for AnchorInstructionsParserTestTemplate {
                 &format!("test_{}_insufficient_accounts", ix.name),
                 proc_macro2::Span::call_site(),
             );
-            let variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
-            let keys_struct_name = syn::Ident::new(&format!("{}Keys", ix.name.to_case(Case::Pascal)), proc_macro2::Span::call_site());
+            let _variant_name = syn::Ident::new(&ix.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
+            let _keys_struct_name = syn::Ident::new(&format!("{}Keys", ix.name.to_case(Case::Pascal)), proc_macro2::Span::call_site());
             let accounts_len_const = syn::Ident::new(&format!("{}_IX_ACCOUNTS_LEN", ix.name.to_shouty_snake_case()), proc_macro2::Span::call_site());
             
             // Every instruction now has Args struct (even if only contains discriminator)

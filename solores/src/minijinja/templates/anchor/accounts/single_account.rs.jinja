@@ -1,0 +1,99 @@
+pub const {{ account.name | snake_case | upper }}_ACCOUNT_DISCM: [u8; 8] = {{ account.discriminator if account.discriminator else "[0, 0, 0, 0, 0, 0, 0, 0]" }};
+{% if account.docs %}
+{{ account.docs | multiline_docs }}
+{% endif %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ account.name }} {
+    pub discriminator: [u8; 8],
+{% for field in account.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if has_serde %}
+    {% if field.rust_type == "solana_pubkey::Pubkey" %}
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<serde_with::DisplayFromStr>")
+    )]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% elif field.rust_type | starts_with("std::collections::HashMap") %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<std::collections::HashMap<serde_with::DisplayFromStr, _>>"))]
+    {% elif field.rust_type | starts_with("std::option::Option<solana_pubkey::Pubkey>") %}
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<std::option::Option<serde_with::DisplayFromStr>>")
+    )]
+    {% elif field.rust_type | starts_with("std::vec::Vec<solana_pubkey::Pubkey>") %}
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<std::vec::Vec<serde_with::DisplayFromStr>>")
+    )]
+    {% endif %}
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+{% endfor %}
+}
+
+impl Default for {{ account.name }} {
+    fn default() -> Self {
+        Self {
+            discriminator: {{ account.name | snake_case | upper }}_ACCOUNT_DISCM,
+{% for field in account.fields %}
+            {% if field.is_big_array %}
+            {{ field.name | rust_field }}: [0; {{ field.rust_type | regex_replace }}],
+            {% else %}
+            {{ field.name | rust_field }}: Default::default(),
+            {% endif %}
+{% endfor %}
+        }
+    }
+}
+impl {{ account.name }} {
+    pub const MEM_LEN: usize = std::mem::size_of::<Self>();
+    pub const PACKED_LEN: usize = {{ account.packed_size }};
+    pub fn discriminator() -> [u8; 8] {
+        {{ account.name | snake_case | upper }}_ACCOUNT_DISCM
+    }
+    pub fn try_to_vec(&self) -> std::io::Result<Vec<u8>> {
+        borsh::to_vec(self)
+    }
+    pub fn from_bytes(
+        data: &[u8],
+    ) -> Result<Self, crate::errors::AccountParseError> {
+        if data.len() < 8 {
+            return Err(crate::errors::AccountParseError::DataTooShort {
+                expected: 8,
+                found: data.len(),
+            });
+        }
+        let expected_discriminator = Self::discriminator();
+        if &data[0..8] != expected_discriminator {
+            let mut found = [0u8; 8];
+            found.copy_from_slice(&data[0..8]);
+            return Err(
+                crate::errors::AccountParseError::DiscriminatorMismatch {
+                    expected: expected_discriminator,
+                    found,
+                },
+            );
+        }
+        if data.len() != Self::PACKED_LEN {
+            return Err(
+                crate::errors::AccountParseError::IncorrectLength {
+                    expected: Self::PACKED_LEN,
+                    found: data.len(),
+                },
+            );
+        }
+        borsh::BorshDeserialize::deserialize(&mut &data[..])
+            .map_err(|e| {
+                crate::errors::AccountParseError::DeserializationFailed(
+                    e.to_string(),
+                )
+            })
+    }
+}

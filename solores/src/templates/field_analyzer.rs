@@ -4,7 +4,6 @@
 //! 核心功能：确保Types中不包含Instructions/Events/Accounts使用的字段定义
 
 use std::collections::{HashMap, HashSet};
-use convert_case::Case;
 
 /// 字段分配映射
 #[derive(Debug, Clone)]

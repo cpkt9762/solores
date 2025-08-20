@@ -1,0 +1,87 @@
+//! {{ event.name }} Event
+//! Single event structure for {{ crate_name }}
+
+use crate::errors::EventParseError;
+
+{% set event_upper = event.name | upper %}
+/// Event discriminator for {{ event.name }}
+pub const {{ event_upper }}_EVENT_DISCM: [u8; 8] = {{ event.discriminator }};
+
+{% if event.docs %}
+{{ event.docs | multiline_docs }}
+{% endif %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ event.name }} {
+    /// Event discriminator
+    pub discriminator: [u8; 8],
+    {% for field in event.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if has_serde %}
+    {% if field.is_pubkey %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% endif %}
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+    {% endfor %}
+}
+
+impl {{ event.name }} {
+    /// Get event discriminator
+    pub fn discriminator() -> [u8; 8] {
+        {{ event_upper }}_EVENT_DISCM
+    }
+    
+    /// Create new event
+    pub fn new(
+        {% for field in event.fields %}
+        {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+        {% endfor %}
+    ) -> Self {
+        Self {
+            discriminator: Self::discriminator(),
+            {% for field in event.fields %}
+            {{ field.name | rust_field }},
+            {% endfor %}
+        }
+    }
+    
+    /// Deserialize from bytes with discriminator validation
+    pub fn from_bytes(data: &[u8]) -> std::result::Result<Self, EventParseError> {
+        if data.len() < 8 {
+            return Err(EventParseError::DataTooShort { expected: 8, found: data.len() });
+        }
+        
+        let discriminator: [u8; 8] = data[0..8].try_into().unwrap();
+        if discriminator != Self::discriminator() {
+            return Err(EventParseError::DiscriminatorMismatch { 
+                expected: Self::discriminator(), 
+                found: discriminator 
+            });
+        }
+        
+        borsh::BorshDeserialize::deserialize(&mut &data[..])
+            .map_err(|e| EventParseError::DeserializationFailed(
+                format!("Failed to deserialize {} event: {}", "{{ event.name }}", e)
+            ))
+    }
+    
+    /// Serialize to bytes
+    pub fn try_to_vec(&self) -> std::result::Result<std::vec::Vec<u8>, std::io::Error> {
+        borsh::to_vec(self)
+    }
+    
+    {% if has_serde %}
+    /// Serialize to JSON string (requires "serde" feature)
+    #[cfg(feature = "serde")]
+    pub fn to_json(&self) -> std::result::Result<std::string::String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+    {% endif %}
+}

@@ -14,7 +14,7 @@ const DEFAULT_PROGRAM_ID_STR: &str = "TH1S1SNoTAVAL1DPUBKEYDoNoTUSE1111111111111
 /// 检查是否应该使用Askama模板系统
 
 /// 检查是否应该使用MiniJinja模板系统
-fn should_use_minijinja(args: &Args) -> bool {
+fn should_use_minijinja(_args: &Args) -> bool {
     // CLI参数优先级最高（将来可能添加）
     // if args.use_minijinja {
     //     log::info!("🔧 通过 --use-minijinja 参数启用 MiniJinja 模板系统");
@@ -144,14 +144,14 @@ pub fn write_lib(args: &Args, idl: &dyn IdlFormat) -> std::io::Result<()> {
 
 
 /// 使用 MiniJinja 模板系统生成代码
-pub fn write_lib_with_minijinja(args: &Args, idl: &dyn IdlFormat) -> Result<(), SoloresError> {
+pub fn write_lib_with_minijinja(args: &Args, _idl: &dyn IdlFormat) -> Result<(), SoloresError> {
     log::info!("🔧 使用 MiniJinja 模板系统生成代码");
     
     // 通过重新解析 IDL 文件来获取完整数据
     let idl_format = convert_dyn_idl_to_enum_with_reparse(args)?;
     
     // 创建 MiniJinja 模板生成器
-    let mut generator = crate::templates::minijinja_generator::MinijinjaTemplateGenerator::new(idl_format)?;
+    let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(idl_format)?;
     
     // 生成多文件架构
     generator.generate_multi_file_structure(

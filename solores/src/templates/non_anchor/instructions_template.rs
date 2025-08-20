@@ -17,7 +17,7 @@ use crate::templates::common::{
     import_manager::ImportManager,
     naming_converter::NamingConverter
 };
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, generate_option_pubkey_serde_attr, generate_option_pubkey_serde_helpers, generate_pubkey_array_serde_attr, generate_pubkey_array_serde_helpers, generate_big_array_import, parse_array_size, is_pubkey_type};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, generate_option_pubkey_serde_attr, generate_option_pubkey_serde_helpers, generate_pubkey_array_serde_attr, generate_pubkey_array_serde_helpers, parse_array_size};
 
 /// 非 Anchor Instructions 模板
 pub struct NonAnchorInstructionsTemplate<'a> {
@@ -586,7 +586,7 @@ impl<'a> NonAnchorInstructionsTemplate<'a> {
         );
 
         let doc_comments = DocGenerator::generate_instruction_docs(&instruction.docs);
-        let instruction_name_str = &instruction.name;
+        let _instruction_name_str = &instruction.name;
 
         // 生成指令参数字段
         let args_fields = if let Some(args) = &instruction.args {

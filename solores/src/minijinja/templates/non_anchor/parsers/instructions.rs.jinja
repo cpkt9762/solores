@@ -1,0 +1,62 @@
+//! {{ crate_name }} Instruction Parsers
+//! Non-Anchor style instruction parsing
+
+use crate::errors::InstructionParseError;
+
+/// Program instruction types for Non-Anchor contract
+#[derive(Clone, Debug)]
+pub enum ProgramInstruction {
+    {% for instruction in instructions %}
+    {% if instruction.docs %}
+    {{ instruction.docs | multiline_docs }}
+    {% endif %}
+    {% if instruction.accounts %}
+    {{ instruction.name }}(crate::instructions::{{ instruction.name }}Keys, crate::instructions::{{ instruction.name }}IxData),
+    {% else %}
+    {{ instruction.name }}(crate::instructions::{{ instruction.name }}IxData),
+    {% endif %}
+    {% endfor %}
+}
+
+impl ProgramInstruction {
+    /// Parse instruction from instruction data and accounts
+    pub fn try_parse(
+        instruction_data: &[u8],
+        accounts: &[solana_pubkey::Pubkey],
+    ) -> std::result::Result<Self, InstructionParseError> {
+        if instruction_data.is_empty() {
+            return Err(InstructionParseError::DataTooShort { expected: 1, found: 0 });
+        }
+        
+        // Non-Anchor programs typically use first byte as instruction type
+        let instruction_type = instruction_data[0];
+        {% for instruction in instructions %}
+        {% set loop_index = loop.index0 %}
+        if instruction_type == {{ loop_index }} {
+            let ix_data = crate::instructions::{{ instruction.name }}IxData::from_bytes(instruction_data)
+                .map_err(|e| InstructionParseError::DeserializationFailed(
+                    format!("Failed to deserialize {} instruction: {}", "{{ instruction.name }}", e)
+                ))?;
+            {% if instruction.accounts %}
+            if accounts.len() < {{ instruction.accounts|length }} {
+                return Err(InstructionParseError::DataTooShort { 
+                    expected: {{ instruction.accounts|length }}, 
+                    found: accounts.len() 
+                });
+            }
+            let keys = crate::instructions::{{ instruction.name }}Keys::from(&accounts[..{{ instruction.accounts|length }}]);
+            return Ok(Self::{{ instruction.name }}(keys, ix_data));
+            {% else %}
+            return Ok(Self::{{ instruction.name }}(ix_data));
+            {% endif %}
+        }
+        {% endfor %}
+        Err(InstructionParseError::DiscriminatorMismatch { expected: [0; 8], found: [instruction_type, 0, 0, 0, 0, 0, 0, 0] })
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::InstructionParser".into()
+    }
+}
+

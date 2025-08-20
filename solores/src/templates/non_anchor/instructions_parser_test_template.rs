@@ -21,7 +21,7 @@ impl NonAnchorInstructionsParserTestTemplate {
 }
 
 impl NonAnchorInstructionsParserTestGenerator for NonAnchorInstructionsParserTestTemplate {
-    fn generate_instructions_consistency_tests(&self, instructions: &[NonAnchorInstruction], program_name: &str) -> TokenStream {
+    fn generate_instructions_consistency_tests(&self, instructions: &[NonAnchorInstruction], _program_name: &str) -> TokenStream {
         if instructions.is_empty() {
             return quote! {};
         }

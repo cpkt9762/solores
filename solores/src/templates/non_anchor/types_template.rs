@@ -12,7 +12,7 @@ use crate::Args;
 use crate::templates::{TemplateGenerator, TypesTemplateGenerator};
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
 use crate::templates::field_analyzer::{FieldAllocationAnalyzer, FieldAllocationMap};
-use crate::utils::{generate_pubkey_serde_attr, generate_pubkey_array_serde_attr, generate_large_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, generate_option_pubkey_serde_helpers, is_pubkey_type, parse_array_size};
+use crate::utils::{generate_pubkey_serde_attr, generate_pubkey_array_serde_attr, generate_large_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, generate_option_pubkey_serde_helpers, is_pubkey_type};
 use std::cell::RefCell;
 
 /// 非 Anchor Types 模板
@@ -70,7 +70,7 @@ impl<'a> TypesTemplateGenerator for NonAnchorTypesTemplate<'a> {
                 log::debug!("   🗑️ 跳过类型: {} (已被其他模块使用)", r#type.name);
             }
             should_include
-        }).map(|(index, r#type)| {
+        }).map(|(_index, r#type)| {
             let type_name = syn::Ident::new(&r#type.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             let doc_comments = DocGenerator::generate_non_anchor_type_docs(r#type);
             
@@ -120,7 +120,7 @@ impl<'a> TypesTemplateGenerator for NonAnchorTypesTemplate<'a> {
                         }
                     },
                 crate::idl_format::non_anchor_idl::NonAnchorTypeKind::Enum { variants } => {
-                        let enum_variants = variants.iter().enumerate().map(|(variant_index, variant)| {
+                        let enum_variants = variants.iter().enumerate().map(|(_variant_index, variant)| {
                             let variant_name = syn::Ident::new(&variant.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
                             let variant_docs = quote! {}; // EnumVariant doesn't have docs field
                             
@@ -456,6 +456,7 @@ impl<'a> NonAnchorTypesTemplate<'a> {
     }
 
     /// 检查 NonAnchor 字段类型是否为 Pubkey
+    #[allow(dead_code)]
     fn is_non_anchor_field_pubkey_type(field_type: &crate::idl_format::non_anchor_idl::NonAnchorFieldType) -> bool {
         match field_type {
             crate::idl_format::non_anchor_idl::NonAnchorFieldType::Basic(s) => {
@@ -633,7 +634,7 @@ impl<'a> NonAnchorTypesTemplate<'a> {
             },
             
             crate::idl_format::non_anchor_idl::NonAnchorTypeKind::Enum { variants } => {
-                let variant_tokens = variants.iter().enumerate().map(|(variant_index, variant)| {
+                let variant_tokens = variants.iter().enumerate().map(|(_variant_index, variant)| {
                         let variant_name = syn::Ident::new(&variant.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
                         let variant_docs = quote! {}; // EnumVariant doesn't have docs field
                         

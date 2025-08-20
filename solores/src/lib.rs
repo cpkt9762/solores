@@ -17,7 +17,8 @@ use crate::error::{SoloresError, diagnose_json_error, validate_idl_structure, fo
 
 pub mod error;
 pub mod idl_format;
-pub mod templates;  // 新增模板系统
+pub mod minijinja;  // MiniJinja 模块化模板系统
+pub mod templates;  // 传统模板系统
 pub mod utils;
 pub mod workspace;  // 新增workspace生成功能
 pub mod write_gitignore;

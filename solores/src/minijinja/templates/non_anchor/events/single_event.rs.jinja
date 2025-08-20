@@ -1,0 +1,71 @@
+//! {{ event.name }} Event
+//! Single event structure for {{ crate_name }}
+
+use crate::errors::EventParseError;
+
+{% if has_serde %}
+#[cfg(feature = "serde")]
+use serde_with::serde_as;
+{% endif %}
+{% if event.docs %}
+{{ event.docs | multiline_docs }}
+{% endif %}
+#[derive(borsh::BorshDeserialize, borsh::BorshSerialize, Clone, Debug)]
+{% if has_serde %}
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+{% endif %}
+pub struct {{ event.name }} {
+    {% for field in event.fields %}
+    {% if field.docs %}
+    {{ field.docs | multiline_docs }}
+    {% endif %}
+    {% if has_serde %}
+    {% if field.is_pubkey %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.is_big_array %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
+    {% endif %}
+    {% endif %}
+    pub {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+    {% endfor %}
+}
+
+impl {{ event.name }} {
+    /// Create new event
+    pub fn new(
+        {% for field in event.fields %}
+        {{ field.name | rust_field }}: {{ field.rust_type | type_path }},
+        {% endfor %}
+    ) -> Self {
+        Self {
+            {% for field in event.fields %}
+            {{ field.name | rust_field }},
+            {% endfor %}
+        }
+    }
+    
+    /// Deserialize from bytes (NonAnchor style - no discriminator validation)
+    pub fn from_bytes(data: &[u8]) -> std::result::Result<Self, EventParseError> {
+        if data.is_empty() {
+            return Err(EventParseError::DataTooShort { expected: 1, found: 0 });
+        }
+        
+        borsh::BorshDeserialize::deserialize(&mut &data[..])
+            .map_err(|e| EventParseError::DeserializationFailed(
+                format!("Failed to deserialize {} event: {}", "{{ event.name }}", e)
+            ))
+    }
+    
+    /// Serialize to bytes
+    pub fn try_to_vec(&self) -> std::result::Result<std::vec::Vec<u8>, std::io::Error> {
+        borsh::to_vec(self)
+    }
+    
+    {% if has_serde %}
+    /// Serialize to JSON string (requires "serde" feature)
+    #[cfg(feature = "serde")]
+    pub fn to_json(&self) -> std::result::Result<std::string::String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+    {% endif %}
+}

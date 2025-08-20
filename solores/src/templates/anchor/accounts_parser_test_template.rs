@@ -5,11 +5,9 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use convert_case::{Case, Casing};
-use heck::ToShoutySnakeCase;
 
 use crate::idl_format::anchor_idl::AnchorAccount;
 use crate::templates::{AccountsParserTestGenerator, TemplateGenerator};
-use crate::templates::common::doc_generator::DocGenerator;
 
 /// Anchor Accounts Parser 测试模板
 pub struct AnchorAccountsParserTestTemplate;

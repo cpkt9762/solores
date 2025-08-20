@@ -241,7 +241,7 @@ impl<'a> NonAnchorEventsTemplate<'a> {
             return quote! {};
         }
 
-        let event_wrappers = events.iter().enumerate().map(|(index, event)| {
+        let event_wrappers = events.iter().enumerate().map(|(_index, event)| {
             let struct_name = syn::Ident::new(&event.name.to_case(Case::Pascal), proc_macro2::Span::call_site());
             let wrapper_name = syn::Ident::new(&format!("{}Event", event.name.to_case(Case::Pascal)), proc_macro2::Span::call_site());
             let discm_const_name = syn::Ident::new(

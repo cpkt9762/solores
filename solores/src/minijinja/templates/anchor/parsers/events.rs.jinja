@@ -1,0 +1,94 @@
+//! {{ crate_name }} Event Parsers
+//! Anchor-style event parsing with discriminator support
+
+{% if events and events|length > 0 %}
+use crate::errors::EventParseError;
+
+/// Program event types
+#[derive(Clone, Debug)]
+pub enum ProgramEvent {
+    {% for event in events %}
+    {% if event.docs %}
+    {{ event.docs | multiline_docs }}
+    {% endif %}
+    {{ event.name }}(crate::events::{{ event.name }}),
+    {% endfor %}
+}
+
+impl ProgramEvent {
+    /// Parse event from raw bytes using discriminator
+    pub fn try_parse(data: &[u8]) -> std::result::Result<Self, EventParseError> {
+        if data.len() < 8 {
+            return Err(EventParseError::DataTooShort { expected: 8, found: data.len() });
+        }
+        
+        let discriminator: [u8; 8] = data[0..8].try_into().unwrap();
+        
+        {% for event in events %}
+        if discriminator == crate::events::{{ event.name }}::discriminator() {
+            return crate::events::{{ event.name }}::from_bytes(data).map(ProgramEvent::{{ event.name }});
+        }
+        {% endfor %}
+        
+        Err(EventParseError::DiscriminatorMismatch { 
+            expected: [0; 8], 
+            found: discriminator 
+        })
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::EventParser".into()
+    }
+}
+
+
+{% if has_serde %}
+/// Parse event from JSON string (requires "serde" feature)
+#[cfg(feature = "serde")]
+pub fn parse_event_from_json(json: &str) -> std::result::Result<ProgramEvent, serde_json::Error> {
+    // For JSON parsing, we need to determine event type from the data structure
+    // This is a simplified implementation - may need enhancement based on actual JSON structure
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    
+    {% for event in events %}
+    if let Ok(event) = serde_json::from_value::<crate::events::{{ event.name }}>(value.clone()) {
+        return Ok(ProgramEvent::{{ event.name }}(event));
+    }
+    {% endfor %}
+    
+    Err(serde_json::Error::custom("Unable to parse JSON into any known event type"))
+}
+{% endif %}
+{% else %}
+//! No events defined in this program
+use crate::errors::EventParseError;
+
+/// Program event types (empty)
+#[derive(Clone, Debug)]
+pub enum ProgramEvent {
+    // No events defined in this program
+}
+
+impl ProgramEvent {
+    /// Parse event from raw bytes (always fails for empty events)
+    pub fn try_parse(_data: &[u8]) -> std::result::Result<Self, EventParseError> {
+        Err(EventParseError::DeserializationFailed(
+            "{{ crate_name }}::No events defined in this program".to_string()
+        ))
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::EventParser".into()
+    }
+}
+
+{% if has_serde %}
+/// Parse event from JSON string (requires "serde" feature) - always fails for empty events
+#[cfg(feature = "serde")]
+pub fn parse_event_from_json(_json: &str) -> std::result::Result<ProgramEvent, serde_json::Error> {
+    Err(serde_json::Error::custom("{{ crate_name }}::No events defined in this program"))
+}
+{% endif %}
+{% endif %}

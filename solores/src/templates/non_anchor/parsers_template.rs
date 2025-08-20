@@ -8,7 +8,6 @@ use convert_case::{Case, Casing};
 use heck::ToShoutySnakeCase;
 
 use crate::idl_format::non_anchor_idl::NonAnchorIdl;
-use crate::idl_format::IdlFormat;
 use crate::Args;
 use crate::templates::{TemplateGenerator, ParsersTemplateGenerator};
 use crate::templates::non_anchor::instructions_parser_test_template::NonAnchorInstructionsParserTestTemplate;

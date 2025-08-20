@@ -16,7 +16,7 @@ use crate::templates::common::{
     import_manager::{ImportManager, ImportType, SolanaImport},
     naming_converter::NamingConverter
 };
-use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, parse_array_size, generate_pubkey_array_serde_attr, is_pubkey_array_type};
+use crate::utils::{to_snake_case_with_serde, generate_pubkey_serde_attr, parse_array_size, generate_pubkey_array_serde_attr};
 
 /// Anchor Instructions 模板
 pub struct AnchorInstructionsTemplate<'a> {
@@ -809,7 +809,7 @@ impl<'a> AnchorInstructionsTemplate<'a> {
             let arg_fields: Vec<_> = args.iter().map(|arg| {
                 let (snake_field_name, _) = to_snake_case_with_serde(&arg.name);
                 let field_name = syn::Ident::new(&snake_field_name, proc_macro2::Span::call_site());
-                let field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
+                let _field_type = Self::convert_anchor_field_type_to_rust(&arg.field_type);
                 
                 // 为数组类型生成特殊格式化
                 match &arg.field_type {

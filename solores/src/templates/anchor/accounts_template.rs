@@ -6,7 +6,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use convert_case::{Case, Casing};
 use heck::ToShoutySnakeCase;
-use sha2::{Digest};
 
 use crate::idl_format::anchor_idl::AnchorIdl;
 use crate::idl_format::anchor_idl::AnchorAccount;
@@ -14,7 +13,7 @@ use crate::idl_format::anchor_idl::{AnchorType, AnchorTypeKind, AnchorFieldType}
 use crate::Args;
 use crate::templates::TemplateGenerator;
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
-use crate::utils::{generate_pubkey_serde_attr, generate_large_array_serde_attr, generate_pubkey_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, parse_array_size, to_snake_case_with_serde, is_pubkey_type, is_pubkey_array_type};
+use crate::utils::{generate_pubkey_serde_attr, generate_pubkey_array_serde_attr, parse_array_size, to_snake_case_with_serde, is_pubkey_array_type};
 use std::cell::RefCell;
 
 /// Anchor Accounts 模板
@@ -137,7 +136,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
         if field_type.starts_with("[") && field_type.ends_with("]") {
             // 提取数组信息：[type; size]
             if let Some(inner) = field_type.strip_prefix("[").and_then(|s| s.strip_suffix("]")) {
-                if let Some((type_part, size_part)) = inner.rsplit_once("; ") {
+                if let Some((_type_part, size_part)) = inner.rsplit_once("; ") {
                     if let Ok(size) = size_part.parse::<usize>() {
                         if size > 32 {
                             // 大数组需要使用 unsafe { std::mem::zeroed() }
@@ -290,6 +289,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
     }
 
     /// 生成账户字段（保留用于向后兼容）
+    #[allow(dead_code)]
     fn generate_account_fields(_account_type: &str) -> TokenStream {
         // This method is kept for backward compatibility but is no longer used
         // All account field generation is now handled through named_types lookup
@@ -654,6 +654,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
 
 
     /// 从named_type生成默认字段赋值
+    #[allow(dead_code)]
     fn generate_default_field_assignments_from_type(named_type: &AnchorType) -> TokenStream {
         if let Some(type_def) = &named_type.kind {
             if let AnchorTypeKind::Struct(typedef_struct) = type_def {
@@ -769,7 +770,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
             &format!("{}_ACCOUNT_DISCM", account.name.to_shouty_snake_case()),
             proc_macro2::Span::call_site(),
         );
-        let len_const = syn::Ident::new(
+        let _len_const = syn::Ident::new(
             &format!("{}_LEN", account.name.to_shouty_snake_case()),
             proc_macro2::Span::call_site(),
         );
@@ -1154,8 +1155,7 @@ impl<'a> AnchorAccountsTemplate<'a> {
             },
             AnchorFieldType::Complex { .. } => {
                 8 // 复合类型默认估算
-            },
-            _ => 8, // 其他类型默认
+            }
         }
     }
     

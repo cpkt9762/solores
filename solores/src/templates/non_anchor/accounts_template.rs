@@ -11,7 +11,7 @@ use crate::idl_format::non_anchor_idl::{NonAnchorIdl, NonAnchorFieldType, NonAnc
 use crate::Args;
 use crate::templates::TemplateGenerator;
 use crate::templates::common::{doc_generator::DocGenerator, naming_converter::NamingConverter};
-use crate::utils::{generate_pubkey_serde_attr, generate_large_array_serde_attr, generate_pubkey_array_serde_attr, generate_big_array_import, generate_pubkey_array_serde_helpers, parse_array_size, is_pubkey_type};
+use crate::utils::{generate_pubkey_serde_attr};
 use std::cell::RefCell;
 
 /// 非 Anchor Accounts 模板
@@ -940,6 +940,7 @@ impl<'a> NonAnchorAccountsTemplate<'a> {
     }
 
     /// 计算账户的 PACKED_LEN 大小（通用版本）
+    #[allow(dead_code)]
     fn calculate_account_packed_size_static(account: &NonAnchorAccount) -> usize {
         let mut size = 0; // NonAnchor 没有 discriminator
         

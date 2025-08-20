@@ -6,7 +6,7 @@ use crate::idl_format::{AnchorIdl, NonAnchorIdl};
 use crate::Args;
 
 use super::{
-    AccountsParserTestGenerator, ContractMode, InstructionsParserTestGenerator,
+    AccountsParserTestGenerator, InstructionsParserTestGenerator,
     NonAnchorAccountsParserTestGenerator, NonAnchorInstructionsParserTestGenerator,
     ParsersTemplateGenerator, TemplateGenerator, TypesTemplateGenerator,
 };
@@ -158,6 +158,7 @@ impl TemplateFactory {
 
     /// 将NonAnchorIdl转换为AnchorIdl兼容格式
     /// 这是临时方案，用于兼容当前的模板接口
+    #[allow(dead_code)]
     fn convert_non_anchor_to_anchor_compat(idl: &NonAnchorIdl) -> AnchorIdl {
         // 转换instructions
         let instructions = idl.instructions.as_ref().map(|non_anchor_instructions| {
@@ -258,6 +259,7 @@ impl TemplateFactory {
     }
 
     /// 转换NonAnchor字段类型为Anchor字段类型
+    #[allow(dead_code)]
     fn convert_non_anchor_field_type_to_anchor(
         field_type: &crate::idl_format::non_anchor_idl::NonAnchorFieldType,
     ) -> crate::idl_format::anchor_idl::AnchorFieldType {

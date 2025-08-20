@@ -13,8 +13,6 @@ pub mod field_analyzer;
 pub mod non_anchor;
 pub mod template_adapter;
 pub mod unified_interface;
-// MiniJinja 模板系统
-pub mod minijinja_generator;
 // pub mod data_adapters; // 已删除 - 使用极简二元架构
 
 // Re-export factory for convenient access

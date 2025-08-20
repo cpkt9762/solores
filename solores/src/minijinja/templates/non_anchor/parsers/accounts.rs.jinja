@@ -1,0 +1,67 @@
+//! {{ crate_name }} Account Parsers
+//! Non-Anchor style account parsing
+
+{% if accounts and accounts|length > 0 %}
+//! Account parser for Non-Anchor contracts
+use crate::errors::AccountParseError;
+
+/// Program account types
+#[derive(Clone, Debug)]
+pub enum ProgramAccount {
+{% for account in accounts %}
+    {{ account.name }}(crate::accounts::{{ account.name }}),
+{% endfor %}
+}
+
+impl ProgramAccount {
+    /// Try to parse account data into one of the known account types
+    pub fn try_parse(data: &[u8]) -> Result<Self, AccountParseError> {
+        if data.is_empty() {
+            return Err(AccountParseError::DataTooShort { expected: 1, found: 0 });
+        }
+        
+{% for account in accounts %}
+        // Try to parse as {{ account.name }}
+        match crate::accounts::{{ account.name }}::from_bytes(data) {
+            Ok(account) => return Ok(ProgramAccount::{{ account.name }}(account)),
+            Err(AccountParseError::IncorrectLength { .. }) => {}
+            Err(e) => {
+                return Err(e);
+            }
+        }
+{% endfor %}
+        
+        Err(AccountParseError::DeserializationFailed(
+            "Unable to parse account data into any known account type".to_string()
+        ))
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::AccountParser".into()
+    }
+}
+{% else %}
+//! No accounts defined in this program
+use crate::errors::AccountParseError;
+
+/// Program account types (empty)
+#[derive(Clone, Debug)]
+pub enum ProgramAccount {
+    // No accounts defined in this program
+}
+
+impl ProgramAccount {
+    /// Try to parse account data (always fails for empty accounts)
+    pub fn try_parse(_data: &[u8]) -> Result<Self, AccountParseError> {
+        Err(AccountParseError::DeserializationFailed(
+            "{{ crate_name }}::No accounts defined in this program".to_string()
+        ))
+    }
+
+    /// Get parser identifier (static method)
+    pub fn id() -> std::borrow::Cow<'static, str> {
+        "{{ crate_name }}::AccountParser".into()
+    }
+}
+{% endif %}

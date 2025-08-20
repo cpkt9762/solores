@@ -66,6 +66,7 @@ pub struct ImportManager {
     /// 实际使用的符号集合（动态跟踪）
     actually_used_symbols: HashSet<String>,
     /// 需要的条件导入（比如测试、特性等）
+    #[allow(dead_code)]
     conditional_imports: HashMap<String, Vec<String>>,
 }
 

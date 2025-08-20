@@ -12,6 +12,39 @@ Raydium 接口修复脚本 - Python重构版本
 
 用法:
     ./scripts/fix_raydium_interface.py --interface-dir path/to/sol_raydium_interface
+    
+MiniJinja 适配修改点 (2024-08-20):
+     1. 解析器匹配模式更新:
+        ❌ 旧: if accounts.len() < SWAP_BASE_IN_IX_ACCOUNTS_LEN
+        ✅ 新: if accounts.len() < 18
+
+     2. 错误处理更新:  
+        ❌ 旧: format!("Insufficient accounts for instruction {}", stringify!(SwapBaseIn))
+        ✅ 新: InstructionParseError::DataTooShort { expected: 18, found: accounts.len() }
+
+     3. 账户切片更新:
+        ❌ 旧: SwapBaseInKeys::from(&accounts[..SWAP_BASE_IN_IX_ACCOUNTS_LEN])
+        ✅ 新: crate::instructions::SwapBaseInKeys::from(&accounts[..18])
+
+     4. 字段命名保持:
+        ❌ 旧脚本查找: pub amm_target_orders: Pubkey,
+        ✅ 新结构使用: pub ammTargetOrders: solana_pubkey::Pubkey,
+
+     5. 模块路径完整:
+        ❌ 旧: SwapBaseInKeys
+        ✅ 新: crate::instructions::SwapBaseInKeys
+
+     6. 错误类型变化:
+        ❌ 旧: 字符串错误消息
+        ✅ 新: InstructionParseError 枚举类型
+
+     📋 TODO 更新列表:
+     - [ ] 更新第123-130行的长度检查模式
+     - [ ] 更新第133-140行的错误消息模式  
+     - [ ] 更新第143-149行的账户传递模式
+     - [ ] 更新第174行的字段名模式 (amm_target_orders → ammTargetOrders)
+     - [ ] 更新第355行的 Copy trait 移除模式
+     - [ ] 更新所有验证检查的模式匹配
 """
 
 import os

@@ -6,12 +6,10 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use crate::idl_format::anchor_idl::AnchorIdl;
-use crate::idl_format::IdlFormat;
 use crate::Args;
 use crate::templates::{TemplateGenerator, ParsersTemplateGenerator};
 use crate::templates::common::import_manager::ImportManager;
 use crate::templates::anchor::instructions_template::AnchorInstructionsTemplate;
-use crate::templates::anchor::accounts_template::AnchorAccountsTemplate;
 use crate::templates::anchor::instructions_parser_test_template::AnchorInstructionsParserTestTemplate;
 use crate::templates::anchor::accounts_parser_test_template::AnchorAccountsParserTestTemplate;
 use crate::templates::{InstructionsParserTestGenerator, AccountsParserTestGenerator};
