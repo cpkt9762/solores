@@ -46,6 +46,7 @@ impl MinijinjaTemplateGenerator {
         output_dir: &Path,
         serde_feature: bool,
         generate_parser: bool,
+        no_empty_workspace: bool,
     ) -> std::result::Result<(), SoloresError> {
         info!("开始使用MiniJinja生成多文件夹架构");
         
@@ -65,7 +66,8 @@ impl MinijinjaTemplateGenerator {
             &self.idl_enum, 
             self.get_program_name(), 
             serde_feature, 
-            generate_parser
+            generate_parser,
+            no_empty_workspace
         )?;
         
         // 确定使用的模板类型

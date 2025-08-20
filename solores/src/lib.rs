@@ -9,24 +9,28 @@ use std::{
 };
 
 use clap::{command, Parser};
-use idl_format::{IdlFormat, IdlFormatEnum, parse_idl_json};
+use idl_format::{parse_idl_json, IdlFormat, IdlFormatEnum};
 
-use crate::error::{SoloresError, diagnose_json_error, validate_idl_structure, format_user_error};
+use crate::error::{diagnose_json_error, format_user_error, validate_idl_structure, SoloresError};
 
 // Just make all mods pub to allow ppl to use the lib
 
+pub mod cargo; // Cargo.toml 生成功能
 pub mod error;
 pub mod idl_format;
-pub mod minijinja;  // MiniJinja 模块化模板系统
-pub mod templates;  // 传统模板系统
+pub mod minijinja; // MiniJinja 模块化模板系统
+                   // pub mod templates;  // 传统模板系统 - 已移除
 pub mod utils;
-pub mod workspace;  // 新增workspace生成功能
+pub mod workspace; // 新增workspace生成功能
 pub mod write_gitignore;
 pub mod write_readme;
 pub mod write_src;
 
-use templates::common::cargo_generator::{write_fine_grained_cargo_toml, write_workspace_member_cargo_toml, should_use_workspace_cargo_toml};
-use workspace::{validate_workspace_config, add_workspace_member, finalize_workspace};
+use cargo::{
+    should_use_workspace_cargo_toml, write_fine_grained_cargo_toml,
+    write_workspace_member_cargo_toml,
+};
+use workspace::{add_workspace_member, finalize_workspace, validate_workspace_config};
 use write_gitignore::write_gitignore;
 use write_readme::write_readme;
 use write_src::*;
@@ -139,20 +143,15 @@ pub struct Args {
 
     #[arg(
         long,
-        help = "generate to_json methods for instructions and accounts (requires serde feature)"
+        default_value = "true",
+        help = "generate to_json methods for instructions and accounts (serde feature, enabled by default)"
     )]
     pub generate_to_json: bool,
 
-    #[arg(
-        long,
-        help = "only generate parser code (skip interface generation)"
-    )]
+    #[arg(long, help = "only generate parser code (skip interface generation)")]
     pub parser_only: bool,
 
-    #[arg(
-        long,
-        help = "批量处理模式 - 处理指定目录中的所有IDL文件"
-    )]
+    #[arg(long, help = "批量处理模式 - 处理指定目录中的所有IDL文件")]
     pub batch: bool,
 
     #[arg(
@@ -168,19 +167,11 @@ pub struct Args {
     )]
     pub test: bool,
 
-    #[arg(
-        long,
-        help = "生成workspace结构（适用于批量处理）"
-    )]
+    #[arg(long, help = "生成workspace结构（适用于批量处理）")]
     pub workspace: bool,
 
-    #[arg(
-        long,
-        help = "指定workspace名称",
-        default_value = "solana_workspace"
-    )]
+    #[arg(long, help = "指定workspace名称", default_value = "solana_workspace")]
     pub workspace_name: String,
-
 
     #[arg(
         long,
@@ -195,6 +186,13 @@ pub struct Args {
         default_value = ""
     )]
     pub batch_include: String,
+
+    #[arg(
+        long,
+        help = "不生成空的 [workspace] 表（适用于独立项目）",
+        default_value = "true"
+    )]
+    pub no_empty_workspace: bool,
 }
 
 /// 获取用于错误显示的绝对路径字符串
@@ -204,7 +202,7 @@ fn get_absolute_path_for_error(path: &Path) -> String {
     if let Ok(canonical_path) = fs::canonicalize(path) {
         return canonical_path.display().to_string();
     }
-    
+
     // 如果 canonicalize 失败（通常是因为文件不存在）
     // 手动构建绝对路径用于错误显示
     if path.is_absolute() {
@@ -215,7 +213,7 @@ fn get_absolute_path_for_error(path: &Path) -> String {
         match env::current_dir() {
             Ok(current_dir) => {
                 let combined_path = current_dir.join(path);
-                
+
                 // 尝试清理路径（去掉 .. 和 . 等）
                 // 注意：这种方法对不存在的文件也有效
                 clean_path(&combined_path).display().to_string()
@@ -232,7 +230,7 @@ fn get_absolute_path_for_error(path: &Path) -> String {
 /// 即使文件不存在也能正常工作
 fn clean_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();
-    
+
     for component in path.components() {
         match component {
             std::path::Component::CurDir => {
@@ -240,7 +238,9 @@ fn clean_path(path: &Path) -> PathBuf {
             }
             std::path::Component::ParentDir => {
                 // 处理父目录 ".."
-                if !components.is_empty() && components.last() != Some(&std::path::Component::ParentDir) {
+                if !components.is_empty()
+                    && components.last() != Some(&std::path::Component::ParentDir)
+                {
                     components.pop();
                 } else if components.is_empty() {
                     components.push(component);
@@ -251,7 +251,7 @@ fn clean_path(path: &Path) -> PathBuf {
             }
         }
     }
-    
+
     components.iter().collect()
 }
 
@@ -259,13 +259,13 @@ fn clean_path(path: &Path) -> PathBuf {
 fn setup_logging() {
     use env_logger::{Builder, Target};
     use log::LevelFilter;
-    
+
     // 清理旧的日志文件
     let log_file_path = "debug_output.log";
     if std::path::Path::new(log_file_path).exists() {
         let _ = std::fs::remove_file(log_file_path);
     }
-    
+
     // 创建文件写入器
     let log_file = OpenOptions::new()
         .create(true)
@@ -273,15 +273,14 @@ fn setup_logging() {
         .truncate(true)
         .open(log_file_path)
         .expect("无法创建日志文件");
-    
+
     let current_dir = env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
-    
+
     // 获取日志级别
-    let log_level = env::var(RUST_LOG_ENV_VAR)
-        .unwrap_or_else(|_| "debug".to_string());
-    
+    let log_level = env::var(RUST_LOG_ENV_VAR).unwrap_or_else(|_| "debug".to_string());
+
     // 配置：所有日志输出到文件，终端不输出日志
     let mut builder = Builder::new();
     builder
@@ -292,10 +291,18 @@ fn setup_logging() {
             let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f");
             let file = record.file().unwrap_or("unknown");
             let line = record.line().unwrap_or(0);
-            writeln!(buf, "[{}] {} [{}:{}]: {}", timestamp, record.level(), file, line, record.args())
+            writeln!(
+                buf,
+                "[{}] {} [{}:{}]: {}",
+                timestamp,
+                record.level(),
+                file,
+                line,
+                record.args()
+            )
         })
         .init();
-    
+
     // 终端只显示日志文件位置
     println!("🔍 Debug日志输出到: {}/{}", current_dir, log_file_path);
     println!("📊 当前日志级别: {}", log_level);
@@ -306,12 +313,29 @@ pub fn main() {
     if env::var(RUST_LOG_ENV_VAR).is_err() {
         env::set_var(RUST_LOG_ENV_VAR, "debug")
     }
-    
+
     // 配置日志输出到文件和终端
     setup_logging();
     log_panics::init();
 
     let args = Args::parse();
+    
+    // 🔍 简单的文件路径验证和调试输出
+    if !args.batch {
+        // 检查单个IDL文件是否可以打开
+        if let Err(e) = std::fs::File::open(&args.idl_path) {
+            // 立即向终端输出调试信息
+            eprintln!("❌ 无法打开IDL文件");
+            eprintln!("📁 当前工作目录: {}", 
+                env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "<unknown>".to_string())
+            );
+            eprintln!("📄 尝试打开的文件: {}", args.idl_path.display());
+            eprintln!("🔍 错误详情: {}", e);
+            std::process::exit(1);
+        }
+    }
 
     if args.batch {
         process_batch(args);
@@ -325,12 +349,16 @@ pub fn main() {
 
 /// Process a single IDL file (original functionality)
 fn process_single_file(mut args: Args) -> Result<(), SoloresError> {
-    let mut file = OpenOptions::new().read(true).open(&args.idl_path)
-        .map_err(|e| SoloresError::file_operation_error(
-            "读取IDL文件",
-            get_absolute_path_for_error(&args.idl_path),
-            e
-        ))?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .open(&args.idl_path)
+        .map_err(|e| {
+            SoloresError::file_operation_error(
+                "读取IDL文件",
+                get_absolute_path_for_error(&args.idl_path),
+                e,
+            )
+        })?;
 
     let idl = load_idl_with_diagnostics(&mut file)?;
 
@@ -347,48 +375,56 @@ fn process_single_file(mut args: Args) -> Result<(), SoloresError> {
     });
 
     args.output_dir.push(&args.output_crate_name);
-    fs::create_dir_all(args.output_dir.join("src/")).map_err(|e| SoloresError::file_operation_error(
-        "创建输出目录",
-        args.output_dir.display().to_string(),
-        e
-    ))?;
+    fs::create_dir_all(args.output_dir.join("src/")).map_err(|e| {
+        SoloresError::file_operation_error("创建输出目录", args.output_dir.display().to_string(), e)
+    })?;
 
     // TODO: multithread, 1 thread per generated file
-    write_gitignore(&args).map_err(|e| SoloresError::file_operation_error(
-        "创建.gitignore文件",
-        args.output_dir.join(".gitignore").display().to_string(),
-        e
-    ))?;
-    
+    write_gitignore(&args).map_err(|e| {
+        SoloresError::file_operation_error(
+            "创建.gitignore文件",
+            args.output_dir.join(".gitignore").display().to_string(),
+            e,
+        )
+    })?;
+
     // Choose appropriate Cargo.toml generation based on workspace mode
     if should_use_workspace_cargo_toml(&args) {
-        write_workspace_member_cargo_toml(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
-            "创建workspace Cargo.toml文件",
-            args.output_dir.join("Cargo.toml").display().to_string(),
-            e
-        ))?;
+        write_workspace_member_cargo_toml(&args, idl.as_ref()).map_err(|e| {
+            SoloresError::file_operation_error(
+                "创建workspace Cargo.toml文件",
+                args.output_dir.join("Cargo.toml").display().to_string(),
+                e,
+            )
+        })?;
     } else {
-        write_fine_grained_cargo_toml(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
-            "创建Cargo.toml文件",
-            args.output_dir.join("Cargo.toml").display().to_string(),
-            e
-        ))?;
+        write_fine_grained_cargo_toml(&args, idl.as_ref()).map_err(|e| {
+            SoloresError::file_operation_error(
+                "创建Cargo.toml文件",
+                args.output_dir.join("Cargo.toml").display().to_string(),
+                e,
+            )
+        })?;
     }
-    
+
     // 调用 write_lib，内部会根据配置选择合适的模板系统
     log::info!("Writing lib.rs for IDL: {}", idl.program_name());
     log::debug!("IDL address: {:?}", idl.program_address());
-    write_lib(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
-        "创建lib.rs文件",
-        args.output_dir.join("src/lib.rs").display().to_string(),
-        e
-    ))?;
-    write_readme(&args, idl.as_ref()).map_err(|e| SoloresError::file_operation_error(
-        "创建README.md文件",
-        args.output_dir.join("README.md").display().to_string(),
-        e
-    ))?;
-    
+    write_lib(&args, idl.as_ref()).map_err(|e| {
+        SoloresError::file_operation_error(
+            "创建lib.rs文件",
+            args.output_dir.join("src/lib.rs").display().to_string(),
+            e,
+        )
+    })?;
+    write_readme(&args, idl.as_ref()).map_err(|e| {
+        SoloresError::file_operation_error(
+            "创建README.md文件",
+            args.output_dir.join("README.md").display().to_string(),
+            e,
+        )
+    })?;
+
     // Copy IDL file to output directory
     let idl_dest = args.output_dir.join("idl.json");
     if let Err(e) = std::fs::copy(&args.idl_path, &idl_dest) {
@@ -396,10 +432,10 @@ fn process_single_file(mut args: Args) -> Result<(), SoloresError> {
     } else {
         log::info!("IDL file copied to {}", idl_dest.display());
     }
-    
+
     // Format generated code with prettyplease
     log::debug!("🎨 使用prettyplease格式化生成的代码...");
-    
+
     // 格式化所有生成的Rust文件
     let src_dir = args.output_dir.join("src");
     if src_dir.exists() {
@@ -408,13 +444,13 @@ fn process_single_file(mut args: Args) -> Result<(), SoloresError> {
     } else {
         log::warn!("⚠️ src目录不存在，跳过格式化");
     }
-    
+
     log::info!(
         "{} crate written to {}",
         args.output_crate_name,
         args.output_dir.to_string_lossy()
     );
-    
+
     Ok(())
 }
 
@@ -423,7 +459,7 @@ fn process_batch(args: Args) {
     log::info!("🚀 启动批量处理模式");
     log::info!("📁 扫描目录: {}", args.idl_path.display());
     log::info!("📁 输出目录: {}", args.batch_output_dir.display());
-    
+
     // 显示过滤器信息
     if !args.batch_exclude.is_empty() {
         log::info!("🚫 排除模式: {}", args.batch_exclude);
@@ -454,14 +490,20 @@ fn process_batch(args: Args) {
     // 扫描IDL文件并应用过滤器
     let idl_files = scan_idl_files_with_filters(&args.idl_path, &args);
     if idl_files.is_empty() {
-        log::warn!("⚠️  在目录 {} 中未找到匹配的IDL文件", args.idl_path.display());
+        log::warn!(
+            "⚠️  在目录 {} 中未找到匹配的IDL文件",
+            args.idl_path.display()
+        );
         if !args.batch_exclude.is_empty() || !args.batch_include.is_empty() {
             log::info!("💡 提示: 检查您的过滤模式是否正确");
         }
         return;
     }
 
-    log::info!("📋 找到 {} 个IDL文件待处理（应用过滤器后）", idl_files.len());
+    log::info!(
+        "📋 找到 {} 个IDL文件待处理（应用过滤器后）",
+        idl_files.len()
+    );
 
     let mut success_count = 0;
     let mut failure_count = 0;
@@ -469,13 +511,18 @@ fn process_batch(args: Args) {
     let mut generated_crates = Vec::new();
 
     for (idx, idl_file) in idl_files.iter().enumerate() {
-        log::info!("🔄 处理文件 {}/{}: {}", idx + 1, idl_files.len(), idl_file.display());
-        
+        log::info!(
+            "🔄 处理文件 {}/{}: {}",
+            idx + 1,
+            idl_files.len(),
+            idl_file.display()
+        );
+
         match process_single_idl_file(&args, &idl_file) {
             Ok(output_dir) => {
                 success_count += 1;
                 log::info!("✅ 成功生成: {}", output_dir.display());
-                
+
                 // Add to workspace if enabled
                 if let Some(ref mut workspace) = workspace_config {
                     if let Some(crate_name) = output_dir.file_name() {
@@ -509,14 +556,14 @@ fn process_batch(args: Args) {
             log::warn!("   {} - {}", file.display(), error);
         }
     }
-    
+
     if !generated_crates.is_empty() {
         log::info!("📦 生成的crate:");
         for crate_name in &generated_crates {
             log::info!("   - {}", crate_name);
         }
     }
-    
+
     log::info!("📁 所有生成的库位于: {}", args.batch_output_dir.display());
 }
 
@@ -525,8 +572,9 @@ fn parse_file_patterns(pattern_str: &str) -> Vec<String> {
     if pattern_str.is_empty() {
         return vec![];
     }
-    
-    pattern_str.split(',')
+
+    pattern_str
+        .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
@@ -542,7 +590,7 @@ fn filename_matches_pattern(filename: &str, pattern: &str) -> bool {
             return regex.is_match(filename);
         }
     }
-    
+
     // 精确匹配
     filename == pattern
 }
@@ -550,48 +598,52 @@ fn filename_matches_pattern(filename: &str, pattern: &str) -> bool {
 /// 扫描IDL文件并应用过滤器
 fn scan_idl_files_with_filters(dir_path: &PathBuf, args: &Args) -> Vec<PathBuf> {
     let all_idl_files = scan_idl_files(dir_path);
-    
+
     // 解析排除和包含模式
     let exclude_patterns = parse_file_patterns(&args.batch_exclude);
     let include_patterns = parse_file_patterns(&args.batch_include);
-    
+
     // 应用过滤器
-    all_idl_files.into_iter().filter(|path| {
-        let filename = path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-            
-        // 检查排除模式
-        if !exclude_patterns.is_empty() {
-            for pattern in &exclude_patterns {
-                if filename_matches_pattern(filename, pattern) {
-                    log::debug!("🚫 排除文件: {} (匹配模式: {})", filename, pattern);
-                    return false;
+    all_idl_files
+        .into_iter()
+        .filter(|path| {
+            let filename = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+
+            // 检查排除模式
+            if !exclude_patterns.is_empty() {
+                for pattern in &exclude_patterns {
+                    if filename_matches_pattern(filename, pattern) {
+                        log::debug!("🚫 排除文件: {} (匹配模式: {})", filename, pattern);
+                        return false;
+                    }
                 }
             }
-        }
-        
-        // 检查包含模式
-        if !include_patterns.is_empty() {
-            for pattern in &include_patterns {
-                if filename_matches_pattern(filename, pattern) {
-                    log::debug!("✅ 包含文件: {} (匹配模式: {})", filename, pattern);
-                    return true;
+
+            // 检查包含模式
+            if !include_patterns.is_empty() {
+                for pattern in &include_patterns {
+                    if filename_matches_pattern(filename, pattern) {
+                        log::debug!("✅ 包含文件: {} (匹配模式: {})", filename, pattern);
+                        return true;
+                    }
                 }
+                // 如果有包含模式但都不匹配，则排除
+                log::debug!("🚫 排除文件: {} (不匹配任何包含模式)", filename);
+                return false;
             }
-            // 如果有包含模式但都不匹配，则排除
-            log::debug!("🚫 排除文件: {} (不匹配任何包含模式)", filename);
-            return false;
-        }
-        
-        true
-    }).collect()
+
+            true
+        })
+        .collect()
 }
 
 /// Scan directory for IDL files
 fn scan_idl_files(dir_path: &PathBuf) -> Vec<PathBuf> {
     let mut idl_files = Vec::new();
-    
+
     if !dir_path.is_dir() {
         log::error!("❌ 指定路径不是目录: {}", dir_path.display());
         return idl_files;
@@ -609,7 +661,9 @@ fn scan_idl_files(dir_path: &PathBuf) -> Vec<PathBuf> {
                                 if let Ok(mut file) = File::open(&path) {
                                     let mut content = String::new();
                                     if file.read_to_string(&mut content).is_ok() {
-                                        if let Ok(_) = serde_json::from_str::<serde_json::Value>(&content) {
+                                        if let Ok(_) =
+                                            serde_json::from_str::<serde_json::Value>(&content)
+                                        {
                                             idl_files.push(path);
                                         } else {
                                             log::debug!("⚠️  跳过无效JSON文件: {}", path.display());
@@ -704,11 +758,25 @@ fn process_single_idl_file(base_args: &Args, idl_file_path: &PathBuf) -> Result<
         log::warn!("复制IDL文件失败: {}", e);
     }
 
-    // Format code (non-blocking)
-    let _ = Command::new("cargo")
-        .args(&["fmt"])
-        .current_dir(&args.output_dir)
-        .output();
+    // Format generated code with prettyplease
+    log::debug!("🎨 使用prettyplease格式化生成的代码...");
+
+    // 格式化所有生成的Rust文件
+    let output_src_dir = args.output_dir.join("src");
+    if output_src_dir.exists() {
+        if let Err(e) = format_rust_files_with_prettyplease(&output_src_dir) {
+            log::warn!("⚠️ prettyplease格式化失败: {}，尝试使用cargo fmt", e);
+            // Fallback to cargo fmt if prettyplease fails
+            let _ = Command::new("cargo")
+                .args(&["fmt"])
+                .current_dir(&args.output_dir)
+                .output();
+        } else {
+            log::debug!("✅ 代码格式化完成 (prettyplease)");
+        }
+    } else {
+        log::warn!("⚠️ src目录不存在，跳过格式化");
+    }
 
     Ok(args.output_dir)
 }
@@ -734,26 +802,25 @@ pub fn load_idl(file: &mut File) -> Box<dyn IdlFormat> {
 /// 带详细诊断的IDL加载函数
 pub fn load_idl_with_diagnostics(file: &mut File) -> Result<Box<dyn IdlFormat>, SoloresError> {
     log::debug!("开始IDL解析诊断流程");
-    
+
     // 1. 读取文件内容
     let mut content = String::new();
-    file.read_to_string(&mut content).map_err(|e| {
-        SoloresError::file_operation_error("读取IDL文件", "IDL file", e)
-    })?;
-    
+    file.read_to_string(&mut content)
+        .map_err(|e| SoloresError::file_operation_error("读取IDL文件", "IDL file", e))?;
+
     log::debug!("IDL文件大小: {} bytes", content.len());
-    
+
     // 2. 验证JSON格式
-    let json_value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| diagnose_json_error(&content, &e))?;
-    
+    let json_value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| diagnose_json_error(&content, &e))?;
+
     log::debug!("JSON格式验证通过");
-    
+
     // 3. 检查基本结构
     validate_idl_structure(&json_value)?;
-    
+
     log::debug!("IDL基本结构验证通过");
-    
+
     // 4. 尝试不同的IDL格式
     try_parse_idl_formats(&content)
 }
@@ -761,7 +828,7 @@ pub fn load_idl_with_diagnostics(file: &mut File) -> Result<Box<dyn IdlFormat>, 
 /// 尝试解析不同的IDL格式（使用新的二元架构）
 fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresError> {
     log::debug!("使用新的二元架构解析IDL格式");
-    
+
     // 使用统一的IDL解析接口
     match parse_idl_json(content) {
         Ok(idl_format) => {
@@ -770,14 +837,17 @@ fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresErr
                     log::info!("✓ 成功加载Anchor IDL格式: {}", anchor_idl.program_name());
                 }
                 IdlFormatEnum::NonAnchor(non_anchor_idl) => {
-                    log::info!("✓ 成功加载NonAnchor IDL格式: {}", non_anchor_idl.program_name());
+                    log::info!(
+                        "✓ 成功加载NonAnchor IDL格式: {}",
+                        non_anchor_idl.program_name()
+                    );
                 }
             }
             Ok(Box::new(idl_format))
         }
         Err(e) => {
             log::error!("IDL格式解析失败");
-            
+
             // 提供详细的错误诊断
             let error_msg = e.to_string();
             if error_msg.contains("duplicate field") {
@@ -786,7 +856,7 @@ fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresErr
                     .nth(1)
                     .and_then(|s| s.split('`').next())
                     .unwrap_or("unknown");
-                    
+
                 Err(SoloresError::DuplicateFieldError {
                     field: field_name.to_string(),
                     location: "IDL file".to_string(),
@@ -802,7 +872,7 @@ fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresErr
                     .nth(1)
                     .and_then(|s| s.split('`').next())
                     .unwrap_or("unknown");
-                    
+
                 Err(SoloresError::MissingFieldError {
                     field: field_name.to_string(),
                     context: "IDL根对象".to_string(),
@@ -814,7 +884,8 @@ fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresErr
                     expected_format: Some(
                         "支持的格式包括:\n\
                         - Anchor IDL (8字节discriminator)\n\
-                        - NonAnchor IDL (1字节discriminator或其他识别方式)".to_string()
+                        - NonAnchor IDL (1字节discriminator或其他识别方式)"
+                            .to_string(),
                     ),
                 })
             }
@@ -836,11 +907,13 @@ fn get_missing_field_suggestion(field_name: &str) -> String {
 /// 使用prettyplease格式化目录中的所有Rust文件
 fn format_rust_files_with_prettyplease(dir: &Path) -> Result<(), SoloresError> {
     use std::fs;
-    
+
     let entries = fs::read_dir(dir).map_err(|e| SoloresError::FileOperationError {
         operation: "读取目录".to_string(),
         path: dir.display().to_string(),
-        current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+        current_dir: std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string()),
         resolved_path: None,
         source: e,
         suggestion: Some("检查目录权限".to_string()),
@@ -850,14 +923,16 @@ fn format_rust_files_with_prettyplease(dir: &Path) -> Result<(), SoloresError> {
         let entry = entry.map_err(|e| SoloresError::FileOperationError {
             operation: "读取目录项".to_string(),
             path: dir.display().to_string(),
-            current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+            current_dir: std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string()),
             resolved_path: None,
             source: e,
             suggestion: Some("检查目录权限".to_string()),
         })?;
 
         let path = entry.path();
-        
+
         if path.is_dir() {
             // 递归处理子目录
             format_rust_files_with_prettyplease(&path)?;
@@ -873,12 +948,14 @@ fn format_rust_files_with_prettyplease(dir: &Path) -> Result<(), SoloresError> {
 /// 使用prettyplease格式化单个Rust文件
 fn format_single_rust_file(file_path: &Path) -> Result<(), SoloresError> {
     use std::fs;
-    
+
     // 读取文件内容
     let content = fs::read_to_string(file_path).map_err(|e| SoloresError::FileOperationError {
         operation: "读取文件".to_string(),
         path: file_path.display().to_string(),
-        current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+        current_dir: std::env::current_dir()
+            .ok()
+            .map(|p| p.display().to_string()),
         resolved_path: None,
         source: e,
         suggestion: Some("检查文件权限".to_string()),
@@ -889,17 +966,19 @@ fn format_single_rust_file(file_path: &Path) -> Result<(), SoloresError> {
         Ok(syntax_tree) => {
             // 使用prettyplease格式化
             let formatted = prettyplease::unparse(&syntax_tree);
-            
+
             // 写回文件
             fs::write(file_path, formatted).map_err(|e| SoloresError::FileOperationError {
                 operation: "写入格式化文件".to_string(),
                 path: file_path.display().to_string(),
-                current_dir: std::env::current_dir().ok().map(|p| p.display().to_string()),
+                current_dir: std::env::current_dir()
+                    .ok()
+                    .map(|p| p.display().to_string()),
                 resolved_path: None,
                 source: e,
                 suggestion: Some("检查文件权限".to_string()),
             })?;
-            
+
             log::debug!("✅ 格式化完成: {}", file_path.display());
         }
         Err(e) => {

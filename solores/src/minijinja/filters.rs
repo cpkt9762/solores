@@ -16,6 +16,11 @@ pub fn to_pascal_case_filter(value: String) -> String {
 
 /// 处理类型路径的过滤器
 pub fn type_path_filter(value: String) -> String {
+    // 添加调试输出
+    if value.starts_with("SmallVec") {
+        eprintln!("🔍 type_path_filter 检测到 SmallVec: {}", value);
+    }
+    
     // 基础类型和已包含命名空间的类型直接返回
     match value.as_str() {
         // Rust基础类型
@@ -39,6 +44,14 @@ pub fn type_path_filter(value: String) -> String {
 
 /// 递归处理复杂类型（Option, Vec, 数组等）
 pub fn process_complex_type(value: &str) -> Option<String> {
+    // SmallVec类型处理 - 转换为Vec
+    if value.starts_with("SmallVec<") {
+        if let Some(inner) = extract_smallvec_inner(value) {
+            let processed_inner = type_path_filter(inner);
+            return Some(format!("Vec<{}>", processed_inner));
+        }
+    }
+    
     // Vec类型处理
     if value.starts_with("Vec<") {
         if let Some(inner) = extract_generic_inner(value, "Vec") {
@@ -97,17 +110,58 @@ pub fn extract_generic_inner(value: &str, prefix: &str) -> Option<String> {
     Some(value[start..end].to_string())
 }
 
-/// 提取数组类型的组成部分
+/// 提取SmallVec的内部类型（忽略尺寸参数，只返回实际类型）
+/// SmallVec<u8, Pubkey> -> Pubkey
+/// SmallVec<16, CompiledInstruction> -> CompiledInstruction
+pub fn extract_smallvec_inner(value: &str) -> Option<String> {
+    if !value.starts_with("SmallVec<") {
+        return None;
+    }
+    
+    let start = "SmallVec<".len();
+    if start >= value.len() {
+        return None;
+    }
+    
+    let end = value.rfind('>')?;
+    if end <= start {
+        return None;
+    }
+    
+    let inner = &value[start..end];
+    
+    // 查找第一个逗号，之后的部分是实际类型
+    if let Some(comma_pos) = inner.find(',') {
+        let type_part = inner[comma_pos + 1..].trim();
+        Some(type_part.to_string())
+    } else {
+        // 如果没有逗号，说明格式不对，返回None
+        None
+    }
+}
+
+/// 提取数组类型的组成部分，正确处理嵌套数组
 pub fn extract_array_parts(value: &str) -> Option<(String, String)> {
     if !value.starts_with("[") || !value.ends_with("]") {
         return None;
     }
     
     let inner = &value[1..value.len()-1];
-    if let Some(semicolon_pos) = inner.find(';') {
+    
+    // 找到最后一个分号，这样可以正确处理嵌套数组
+    // 对于 "[[u64; 8]; 12]"，inner = "[u64; 8]; 12"
+    // 我们需要找到最后的分号来分离 "[u64; 8]" 和 "12"
+    if let Some(semicolon_pos) = inner.rfind(';') {
         let type_part = inner[..semicolon_pos].trim().to_string();
         let size_part = inner[semicolon_pos+1..].trim().to_string();
-        Some((type_part, size_part))
+        
+        // 验证 size_part 是否为纯数字
+        if size_part.chars().all(|c| c.is_ascii_digit()) {
+            Some((type_part, size_part))
+        } else {
+            // 如果不是纯数字，说明这不是一个有效的数组尺寸
+            None
+        }
     } else {
         None
     }

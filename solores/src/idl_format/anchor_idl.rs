@@ -4,7 +4,7 @@
 //! Anchor特有的字段约定等Anchor特性
 
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+// use std::sync::OnceLock;
 
 // 类型别名用于兼容Legacy系统
 pub type Event = AnchorEvent;
@@ -46,9 +46,9 @@ pub struct AnchorIdl {
     pub errors: Option<Vec<AnchorError>>,
     /// 常量定义
     pub constants: Option<Vec<AnchorConstant>>,
-    /// 字段分配缓存 - 使用OnceLock实现线程安全的懒初始化
-    #[serde(skip)]
-    pub field_allocation_cache: OnceLock<crate::templates::field_analyzer::FieldAllocationMap>,
+    // 字段分配缓存已移除 - 传统模板系统不再使用
+    // #[serde(skip)]
+    // pub field_allocation_cache: OnceLock<crate::templates::field_analyzer::FieldAllocationMap>,
 }
 
 /// Anchor合约元数据
@@ -83,7 +83,7 @@ pub struct AnchorInstruction {
 }
 
 /// Anchor账户定义
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AnchorAccount {
     /// 账户名称
     pub name: String,
@@ -93,6 +93,129 @@ pub struct AnchorAccount {
     pub fields: Option<Vec<AnchorField>>,
     /// 文档注释
     pub docs: Option<Vec<String>>,
+}
+
+impl<'de> serde::Deserialize<'de> for AnchorAccount {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct AnchorAccountVisitor;
+
+        impl<'de> Visitor<'de> for AnchorAccountVisitor {
+            type Value = AnchorAccount;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a JSON object representing an AnchorAccount")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<AnchorAccount, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut name = None;
+                let mut discriminator = None;
+                let mut fields = None;
+                let mut docs = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "name" => {
+                            if name.is_some() {
+                                return Err(de::Error::duplicate_field("name"));
+                            }
+                            name = Some(map.next_value()?);
+                        }
+                        "discriminator" => {
+                            if discriminator.is_some() {
+                                return Err(de::Error::duplicate_field("discriminator"));
+                            }
+                            discriminator = Some(map.next_value()?);
+                        }
+                        "fields" => {
+                            // 直接存在的fields字段
+                            if fields.is_some() {
+                                return Err(de::Error::duplicate_field("fields"));
+                            }
+                            fields = Some(map.next_value()?);
+                        }
+                        "type" => {
+                            // 从嵌套的type对象中提取fields
+                            let type_obj: serde_json::Value = map.next_value()?;
+                            
+                            if let serde_json::Value::Object(ref type_map) = type_obj {
+                                // 检查是否为struct类型
+                                if let Some(kind_value) = type_map.get("kind") {
+                                    if kind_value.as_str() == Some("struct") {
+                                        // 提取fields
+                                        if let Some(fields_value) = type_map.get("fields") {
+                                            log::debug!("🔍 从type.fields提取账户字段");
+                                            let mut parsed_fields = Vec::new();
+                                            
+                                            if let serde_json::Value::Array(fields_array) = fields_value {
+                                                for field_value in fields_array {
+                                                    if let serde_json::Value::Object(field_obj) = field_value {
+                                                        if let (Some(field_name), Some(field_type_value)) = (
+                                                            field_obj.get("name").and_then(|v| v.as_str()),
+                                                            field_obj.get("type")
+                                                        ) {
+                                                            let field_type = AnchorFieldType::parse_value(field_type_value.clone())
+                                                                .map_err(de::Error::custom)?;
+                                                            
+                                                            let field_docs = field_obj.get("docs")
+                                                                .and_then(|v| v.as_array())
+                                                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+                                                            
+                                                            parsed_fields.push(AnchorField {
+                                                                name: field_name.to_string(),
+                                                                field_type,
+                                                                kind: None,
+                                                                docs: field_docs,
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if !parsed_fields.is_empty() {
+                                                fields = Some(parsed_fields);
+                                                log::debug!("✅ 成功从type.fields解析到 {} 个字段", fields.as_ref().unwrap().len());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "docs" => {
+                            if docs.is_some() {
+                                return Err(de::Error::duplicate_field("docs"));
+                            }
+                            docs = Some(map.next_value()?);
+                        }
+                        _ => {
+                            // 忽略未知字段
+                            let _: serde_json::Value = map.next_value()?;
+                        }
+                    }
+                }
+
+                let name = name.ok_or_else(|| de::Error::missing_field("name"))?;
+                let discriminator = discriminator.ok_or_else(|| de::Error::missing_field("discriminator"))?;
+
+                Ok(AnchorAccount {
+                    name,
+                    discriminator,
+                    fields,
+                    docs,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(AnchorAccountVisitor)
+    }
 }
 
 /// Anchor账户约束
@@ -611,7 +734,7 @@ impl AnchorIdl {
             events,
             errors,
             constants,
-            field_allocation_cache: OnceLock::new(),
+            // field_allocation_cache: OnceLock::new(),
         })
     }
 
@@ -634,7 +757,7 @@ impl AnchorIdl {
             events: None,
             errors: None,
             constants: None,
-            field_allocation_cache: OnceLock::new(),
+            // field_allocation_cache: OnceLock::new(),
         }
     }
 
@@ -744,40 +867,40 @@ impl AnchorIdl {
         self.events.as_ref()?.iter().find(|event| event.name == event_name)
     }
 
-    // ======= 字段分配缓存成员函数 =======
+    // ======= 字段分配缓存成员函数已移除 - 传统模板系统不再使用 =======
 
-    /// 获取字段分配结果（线程安全缓存）
-    pub fn get_field_allocation(&self) -> &crate::templates::field_analyzer::FieldAllocationMap {
-        self.field_allocation_cache.get_or_init(|| {
-            log::debug!("🔄 AnchorIdl: 初始化字段分配缓存");
-            crate::templates::field_analyzer::FieldAllocationAnalyzer::analyze_anchor_idl(self)
-        })
-    }
+    // /// 获取字段分配结果（线程安全缓存）
+    // pub fn get_field_allocation(&self) -> &crate::templates::field_analyzer::FieldAllocationMap {
+    //     self.field_allocation_cache.get_or_init(|| {
+    //         log::debug!("🔄 AnchorIdl: 初始化字段分配缓存");
+    //         crate::templates::field_analyzer::FieldAllocationAnalyzer::analyze_anchor_idl(self)
+    //     })
+    // }
 
-    /// 获取指定事件的字段分配结果
-    pub fn get_event_allocated_fields(&self, event_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
-        let allocation = self.get_field_allocation();
-        allocation.events_fields.get(event_name)
-    }
+    // /// 获取指定事件的字段分配结果
+    // pub fn get_event_allocated_fields(&self, event_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.events_fields.get(event_name)
+    // }
 
-    /// 获取指定账户的字段分配结果
-    pub fn get_account_allocated_fields(&self, account_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
-        let allocation = self.get_field_allocation();
-        allocation.accounts_fields.get(account_name)
-    }
+    // /// 获取指定账户的字段分配结果
+    // pub fn get_account_allocated_fields(&self, account_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.accounts_fields.get(account_name)
+    // }
 
-    /// 获取剩余类型名称列表（未被Events和Accounts使用的类型）
-    pub fn get_remaining_type_names(&self) -> Vec<String> {
-        let allocation = self.get_field_allocation();
-        crate::templates::field_analyzer::FieldAllocationAnalyzer::get_remaining_type_names(allocation)
-    }
+    // /// 获取剩余类型名称列表（未被Events和Accounts使用的类型）
+    // pub fn get_remaining_type_names(&self) -> Vec<String> {
+    //     let allocation = self.get_field_allocation();
+    //     crate::templates::field_analyzer::FieldAllocationAnalyzer::get_remaining_type_names(allocation)
+    // }
 
-    /// 检查指定类型是否被Events或Accounts使用
-    pub fn is_type_allocated_to_modules(&self, type_name: &str) -> bool {
-        let allocation = self.get_field_allocation();
-        allocation.events_used_types.contains(type_name) || 
-        allocation.accounts_used_types.contains(type_name)
-    }
+    // /// 检查指定类型是否被Events或Accounts使用
+    // pub fn is_type_allocated_to_modules(&self, type_name: &str) -> bool {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.events_used_types.contains(type_name) || 
+    //     allocation.accounts_used_types.contains(type_name)
+    // }
 }
 
 use serde::de::{Deserializer, Error};
@@ -802,7 +925,7 @@ impl AnchorFieldType {
         // 递归深度监控
         let depth = ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         
-        if depth > 500 {
+        if depth > 3000 {
             ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("AnchorFieldType recursion too deep: {}", depth));
         }
@@ -921,7 +1044,7 @@ impl AnchorTypeKind {
         let depth = ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         log::trace!("📊 AnchorTypeKind recursion depth: {}", depth);
         
-        if depth > 500 {
+        if depth > 3000 {
             log::trace!("🚨 AnchorTypeKind RECURSION LIMIT EXCEEDED! Depth: {}", depth);
             ANCHOR_TYPE_KIND_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("AnchorTypeKind recursion too deep: {}", depth));

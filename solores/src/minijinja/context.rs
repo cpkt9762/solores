@@ -16,6 +16,7 @@ pub fn create_template_context(
     program_name: &str,
     serde_feature: bool,
     generate_parser: bool,
+    no_empty_workspace: bool,
 ) -> std::result::Result<Value, SoloresError> {
     // 从IDL中提取实际数据
     let (accounts, instructions, events, types) = extract_idl_data(idl_enum)?;
@@ -32,6 +33,7 @@ pub fn create_template_context(
         has_serde => serde_feature,
         generate_parser => generate_parser,
         has_parsers => generate_parser,
+        no_empty_workspace => no_empty_workspace,
         crate_name => program_name,
         program_name => program_name.to_case(Case::Pascal),
         program_id => program_id,
@@ -122,8 +124,8 @@ pub fn extract_idl_data(
                 non_anchor::build_non_anchor_account_value(account)
             }).collect();
             
-            let instructions: Vec<Value> = non_anchor_idl.instructions().iter().map(|instruction| {
-                non_anchor::build_non_anchor_instruction_value(instruction)
+            let instructions: Vec<Value> = non_anchor_idl.instructions().iter().enumerate().map(|(index, instruction)| {
+                non_anchor::build_non_anchor_instruction_value(instruction, index)
             }).collect();
             
             let events: Vec<Value> = non_anchor_idl.events.as_ref().unwrap_or(&vec![]).iter().map(|event| {

@@ -37,9 +37,9 @@ pub struct NonAnchorIdl {
     /// 序列化格式 - 私有配置字段
     #[serde(skip, default)]
     serialization_format: SerializationFormat,
-    /// 字段分配缓存 - 线程安全懒初始化
-    #[serde(skip)]
-    field_allocation_cache: std::sync::OnceLock<crate::templates::field_analyzer::FieldAllocationMap>,
+    // 字段分配缓存已移除 - 传统模板系统不再使用
+    // #[serde(skip)]
+    // field_allocation_cache: std::sync::OnceLock<crate::templates::field_analyzer::FieldAllocationMap>,
 }
 
 /// 非Anchor合约元数据
@@ -357,7 +357,7 @@ impl NonAnchorIdl {
             events: None,
             discriminator_size: 1, // 默认1字节
             serialization_format: SerializationFormat::Borsh, // 默认Borsh
-            field_allocation_cache: std::sync::OnceLock::new(),
+            // field_allocation_cache: std::sync::OnceLock::new(),
         }
     }
 
@@ -481,7 +481,7 @@ impl NonAnchorFieldType {
         // 递归深度监控
         let depth = NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_add(1, Ordering::SeqCst);
         
-        if depth > 500 {
+        if depth > 3000 {
             NON_ANCHOR_FIELD_TYPE_RECURSION_DEPTH.fetch_sub(1, Ordering::SeqCst);
             return Err(format!("NonAnchorFieldType recursion too deep: {}", depth));
         }
@@ -616,40 +616,40 @@ impl NonAnchorFieldType {
 }
 
 impl NonAnchorIdl {
-    // ======= 字段分配缓存成员函数 =======
+    // ======= 字段分配缓存成员函数已移除 - 传统模板系统不再使用 =======
 
-    /// 获取字段分配结果（线程安全缓存）
-    pub fn get_field_allocation(&self) -> &crate::templates::field_analyzer::FieldAllocationMap {
-        self.field_allocation_cache.get_or_init(|| {
-            log::debug!("🔄 NonAnchorIdl: 初始化字段分配缓存");
-            crate::templates::field_analyzer::FieldAllocationAnalyzer::analyze_non_anchor_idl(self)
-        })
-    }
+    // /// 获取字段分配结果（线程安全缓存）
+    // pub fn get_field_allocation(&self) -> &crate::templates::field_analyzer::FieldAllocationMap {
+    //     self.field_allocation_cache.get_or_init(|| {
+    //         log::debug!("🔄 NonAnchorIdl: 初始化字段分配缓存");
+    //         crate::templates::field_analyzer::FieldAllocationAnalyzer::analyze_non_anchor_idl(self)
+    //     })
+    // }
 
-    /// 获取指定事件的字段分配结果
-    pub fn get_event_allocated_fields(&self, event_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
-        let allocation = self.get_field_allocation();
-        allocation.events_fields.get(event_name)
-    }
+    // /// 获取指定事件的字段分配结果
+    // pub fn get_event_allocated_fields(&self, event_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.events_fields.get(event_name)
+    // }
 
-    /// 获取指定账户的字段分配结果
-    pub fn get_account_allocated_fields(&self, account_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
-        let allocation = self.get_field_allocation();
-        allocation.accounts_fields.get(account_name)
-    }
+    // /// 获取指定账户的字段分配结果
+    // pub fn get_account_allocated_fields(&self, account_name: &str) -> Option<&Vec<crate::templates::field_analyzer::FieldDefinition>> {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.accounts_fields.get(account_name)
+    // }
 
-    /// 获取剩余类型名称列表（未被Events和Accounts使用的类型）
-    pub fn get_remaining_type_names(&self) -> Vec<String> {
-        let allocation = self.get_field_allocation();
-        crate::templates::field_analyzer::FieldAllocationAnalyzer::get_remaining_type_names(allocation)
-    }
+    // /// 获取剩余类型名称列表（未被Events和Accounts使用的类型）
+    // pub fn get_remaining_type_names(&self) -> Vec<String> {
+    //     let allocation = self.get_field_allocation();
+    //     crate::templates::field_analyzer::FieldAllocationAnalyzer::get_remaining_type_names(allocation)
+    // }
 
-    /// 检查指定类型是否被Events或Accounts使用
-    pub fn is_type_allocated_to_modules(&self, type_name: &str) -> bool {
-        let allocation = self.get_field_allocation();
-        allocation.events_used_types.contains(type_name) || 
-        allocation.accounts_used_types.contains(type_name)
-    }
+    // /// 检查指定类型是否被Events或Accounts使用
+    // pub fn is_type_allocated_to_modules(&self, type_name: &str) -> bool {
+    //     let allocation = self.get_field_allocation();
+    //     allocation.events_used_types.contains(type_name) || 
+    //     allocation.accounts_used_types.contains(type_name)
+    // }
 
     /// 获取指定事件的字段定义 (直接从IDL，不使用分配缓存)
     pub fn get_event_fields(&self, event_name: &str) -> Option<&Vec<NonAnchorField>> {
@@ -875,7 +875,7 @@ impl NonAnchorIdl {
             events,
             discriminator_size: 1, // 默认1字节
             serialization_format: SerializationFormat::Borsh, // 默认Borsh
-            field_allocation_cache: std::sync::OnceLock::new(),
+            // field_allocation_cache: std::sync::OnceLock::new(),
         })
     }
 

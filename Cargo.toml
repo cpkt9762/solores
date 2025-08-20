@@ -1,27 +1,10 @@
 [workspace]
 resolver = "2"
 
-members = [
-    # "examples/anchor/ix_blank/*",
-    # "examples/anchor/ix_no_accounts/*",
-    # "examples/anchor/ix_no_accounts_pubkey_arg/*",
-    # "examples/anchor/ix_no_args/*",
-    # "examples/anchor/ix_no_privilege/*",
-    # "examples/anchor/drift/*",
-    # "examples/anchor/marinade/*",
-    # "examples/anchor/unstake_it/*",
-    # "examples/bincode/stake/*",
-    # "examples/bincode/system/*",
-    # "examples/shank/ix_blank/*",
-    # "examples/shank/ix_no_accounts/*",
-    # "examples/shank/ix_no_accounts_pubkey_arg/*",
-    # "examples/shank/ix_no_args/*",
-    # "examples/shank/ix_no_privilege/*",
-    # "examples/shank/phoenix_v1/*",
-    # "examples/shank/token_metadata/*",
-    "solores",
-    # "test_utils"
+members = [ 
+    "solores", 
 ]
+exclude = ["test_output/"]
 
 [workspace.dependencies]
 borsh = "^1.5"

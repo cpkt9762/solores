@@ -7,6 +7,7 @@ use convert_case::{Case, Casing};
 use minijinja::{context, Value};
 use log;
 use super::super::utils;
+use super::super::filters::extract_smallvec_inner;
 
 /// 构建账户Value，确保字段信息完整并修复命名问题
 pub fn build_account_value(account: &AnchorAccount, idl_enum: &IdlFormatEnum) -> Value {
@@ -162,8 +163,9 @@ pub fn build_field_value(field: &AnchorField) -> Value {
     let rust_type = convert_field_type_to_rust(&field.field_type);
     
     context! {
-        name => field.name.clone(),
+        name => field.name.to_case(Case::Snake),
         rust_type => rust_type,
+        is_pubkey => is_anchor_field_pubkey(&field.field_type),
         is_big_array => is_big_array(&field.field_type),
         docs => field.docs.as_ref().map(|docs| docs.join("\n")).unwrap_or_default()
     }
@@ -211,7 +213,51 @@ pub fn convert_field_type_to_rust(field_type: &AnchorFieldType) -> String {
                 _ => kind.clone(),
             }
         },
-        AnchorFieldType::defined(name) => name.clone(),
+        AnchorFieldType::defined(name) => {
+            log::debug!("🔍 Processing defined type: '{}'", name);
+            
+            // SmallVec特殊处理 - 转换为Vec
+            if name.starts_with("SmallVec<") {
+                log::debug!("🔧 SmallVec detected, converting to Vec: '{}'", name);
+                if let Some(inner) = extract_smallvec_inner(name) {
+                    let processed_inner = if inner == "Pubkey" {
+                        "solana_pubkey::Pubkey".to_string()
+                    } else if inner == "CompiledInstruction" || inner == "MessageAddressTableLookup" {
+                        format!("crate::types::{}", inner)
+                    } else if matches!(inner.as_str(), "u8" | "u16" | "u32" | "u64") {
+                        inner
+                    } else {
+                        format!("crate::types::{}", inner)
+                    };
+                    let result = format!("Vec<{}>", processed_inner);
+                    log::debug!("✅ SmallVec converted: '{}' -> '{}'", name, result);
+                    return result;
+                } else {
+                    log::warn!("⚠️ SmallVec parsing failed for: '{}'", name);
+                }
+            }
+            
+            // 检查是否是基础数组类型语法，避免为内置数组类型添加前缀
+            let is_array_syntax = name.starts_with('[') && name.ends_with(']');
+            let is_std_type = name.starts_with("std::") || name.starts_with("solana_");
+            let is_basic_type = matches!(name.as_str(), "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+                                      "u64" | "i64" | "u128" | "i128" | "bool" | 
+                                      "f32" | "f64" | "string");
+            let has_array_pattern = name.contains('[') && name.contains(';') && name.contains(']');
+            
+            log::debug!("  is_array_syntax: {}, is_std_type: {}, is_basic_type: {}, has_array_pattern: {}", 
+                       is_array_syntax, is_std_type, is_basic_type, has_array_pattern);
+            
+            if is_array_syntax || is_std_type || is_basic_type || has_array_pattern {
+                // 这是内置类型或数组，不需要添加前缀
+                log::debug!("✅ Keeping as-is: '{}'", name);
+                name.clone()
+            } else {
+                // 这是真正的用户定义类型，需要添加前缀
+                log::debug!("🏷️ Adding crate::types prefix: '{}'", name);
+                format!("crate::types::{}", name)
+            }
+        },
         AnchorFieldType::array(element_type, size) => {
             let element_rust_type = convert_field_type_to_rust(element_type);
             format!("[{}; {}]", element_rust_type, size)
@@ -231,6 +277,19 @@ pub fn convert_field_type_to_rust(field_type: &AnchorFieldType) -> String {
 pub fn is_big_array(field_type: &AnchorFieldType) -> bool {
     match field_type {
         AnchorFieldType::array(_, size) => *size > 32,  // Rust serde默认只支持到32的数组
+        _ => false,
+    }
+}
+
+/// 检查Anchor字段是否为Pubkey类型
+pub fn is_anchor_field_pubkey(field_type: &AnchorFieldType) -> bool {
+    match field_type {
+        AnchorFieldType::Basic(type_name) => {
+            matches!(type_name.as_str(), "publicKey" | "pubkey")
+        },
+        AnchorFieldType::PrimitiveOrPubkey(type_name) => {
+            matches!(type_name.as_str(), "publicKey" | "pubkey")
+        },
         _ => false,
     }
 }

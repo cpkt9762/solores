@@ -44,7 +44,7 @@ class SoloresWrapper:
         self.solores_bin = self.project_root / "target" / "release" / "solores"
         self.src_dir = self.project_root / "solores" / "src"
         self.cargo_toml = self.project_root / "solores" / "Cargo.toml"
-        self.fix_raydium_script = self.script_dir / "fix_raydium_interface.py"
+        self.fix_raydium_script = self.script_dir / "fix_raydium_interface_minijinja.py"
         
         # Raydium程序地址 - 仅修复这个特定的IDL
         self.RAYDIUM_PROGRAM_ADDRESS = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"

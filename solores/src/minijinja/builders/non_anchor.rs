@@ -32,7 +32,7 @@ pub fn build_non_anchor_account_value(account: &NonAnchorAccount) -> Value {
 }
 
 /// NonAnchor指令构建方法 - 完整实现
-pub fn build_non_anchor_instruction_value(instruction: &NonAnchorInstruction) -> Value {
+pub fn build_non_anchor_instruction_value(instruction: &NonAnchorInstruction, index: usize) -> Value {
     let args: Vec<Value> = instruction.args.as_ref().unwrap_or(&Vec::new()).iter().map(|field| {
         build_non_anchor_field_value(field)
     }).collect();
@@ -41,9 +41,20 @@ pub fn build_non_anchor_instruction_value(instruction: &NonAnchorInstruction) ->
         Value::from_serialize(acc)
     }).collect();
 
+    // 确保discriminator存在，如果没有则用索引
+    let discriminator_value = if let Some(ref disc) = instruction.discriminator {
+        if !disc.is_empty() {
+            disc.clone()
+        } else {
+            vec![index as u8]  // 使用索引作为discriminator
+        }
+    } else {
+        vec![index as u8]  // 使用索引作为discriminator
+    };
+
     context! {
         name => instruction.name.to_case(Case::Pascal),
-        discriminator => instruction.discriminator.as_ref().unwrap_or(&Vec::new()),
+        discriminator => discriminator_value,
         args => args.clone(),
         fields => args,
         accounts => accounts,
@@ -118,7 +129,7 @@ pub fn build_non_anchor_field_value(field: &NonAnchorField) -> Value {
     let rust_type = convert_non_anchor_field_type_to_rust(&field.field_type);
     
     context! {
-        name => field.name.clone(),
+        name => field.name.to_case(Case::Snake),
         rust_type => rust_type,
         is_pubkey => is_non_anchor_field_pubkey(&field.field_type),
         is_big_array => is_non_anchor_big_array(&field.field_type),
@@ -164,7 +175,24 @@ pub fn convert_non_anchor_field_type_to_rust(field_type: &NonAnchorFieldType) ->
             let element_rust_type = convert_non_anchor_field_type_to_rust(element_type);
             format!("[{}; {}]", element_rust_type, size)
         },
-        NonAnchorFieldType::Defined { defined } => defined.clone(),
+        NonAnchorFieldType::Defined { defined } => {
+            // 检查是否是基础数组类型语法，避免为内置数组类型添加前缀
+            if (defined.starts_with('[') && defined.ends_with(']')) ||
+               defined.starts_with("std::") ||
+               defined.starts_with("solana_") ||
+               // 检查是否是基础类型
+               matches!(defined.as_str(), "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+                                          "u64" | "i64" | "u128" | "i128" | "bool" | 
+                                          "f32" | "f64" | "string") ||
+               // 检查是否包含数组语法模式，如 "[u64; 8]"
+               (defined.contains('[') && defined.contains(';') && defined.contains(']')) {
+                // 这是内置类型或数组，不需要添加前缀
+                defined.clone()
+            } else {
+                // 这是真正的用户定义类型，需要添加前缀
+                format!("crate::types::{}", defined)
+            }
+        },
         NonAnchorFieldType::HashMap { key, value } => {
             let key_rust_type = convert_non_anchor_field_type_to_rust(key);
             let value_rust_type = convert_non_anchor_field_type_to_rust(value);

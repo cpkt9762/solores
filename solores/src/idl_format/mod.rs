@@ -195,118 +195,15 @@ impl IdlFormat for IdlFormatEnum {
         true
     }
 
-    fn dependencies(&self, args: &crate::Args) -> Map<String, Value> {
-        use crate::templates::common::cargo_generator::{CargoTomlGenerator, DependencyProfile};
-        use crate::templates::ContractMode;
-
-        let profile = match self {
-            IdlFormatEnum::Anchor(idl) => DependencyProfile {
-                has_errors: idl.errors.is_some(),
-                has_zero_copy: !args.zero_copy.is_empty(),
-                contract_mode: ContractMode::Anchor,
-            },
-            IdlFormatEnum::NonAnchor(idl) => DependencyProfile {
-                has_errors: idl.errors.is_some(),
-                has_zero_copy: !args.zero_copy.is_empty(),
-                contract_mode: ContractMode::NonAnchor,
-            },
-        };
-
-        let generator = CargoTomlGenerator::new(
-            self.program_name(),
-            self.program_version(),
-            args,
-            profile
-        );
-
-        generator.get_fine_grained_dependencies()
+    fn dependencies(&self, _args: &crate::Args) -> Map<String, Value> {
+        // 传统模板系统的依赖方法已移除，现在使用 cargo 模块处理依赖
+        Map::new()
     }
 
-    fn modules<'me>(&'me self, args: &'me crate::Args) -> Vec<Box<dyn IdlCodegenModule + 'me>> {
-        use crate::templates::{TemplateFactory, BoxedTemplateAdapter};
-        
-        let mut modules = Vec::new();
-        
-        match self {
-            IdlFormatEnum::Anchor(idl) => {
-                // 使用Anchor模板生成模块
-                if let Some(_) = &idl.instructions {
-                    let template = TemplateFactory::create_anchor_instructions_template(idl, args);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)) as Box<dyn IdlCodegenModule>);
-                }
-                
-                if let Some(_) = &idl.accounts {
-                    let template = TemplateFactory::create_anchor_accounts_template(idl, args);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                if let Some(_events) = &idl.events {
-                    let template = TemplateFactory::create_anchor_events_template(idl);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                if let Some(_) = &idl.types {
-                    let types_template = TemplateFactory::create_anchor_types_template(idl, args);
-                    // 使用trait继承进行向上转型
-                    let generic_template: Box<dyn crate::templates::TemplateGenerator> = types_template;
-                    modules.push(Box::new(BoxedTemplateAdapter::new(generic_template)));
-                }
-                
-                if let Some(errors) = &idl.errors {
-                    let template = TemplateFactory::create_anchor_errors_template(idl.program_name(), errors);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                // 生成parsers模块（基于generate_parser参数）
-                if args.generate_parser {
-                    let parsers_template = TemplateFactory::create_anchor_parsers_template(idl, args);
-                    // 使用trait继承进行向上转型
-                    let generic_template: Box<dyn crate::templates::TemplateGenerator> = parsers_template;
-                    modules.push(Box::new(BoxedTemplateAdapter::new(generic_template)));
-                }
-            },
-            IdlFormatEnum::NonAnchor(idl) => {
-                // 使用NonAnchor模板生成模块
-                if let Some(_) = &idl.instructions {
-                    let template = TemplateFactory::create_non_anchor_instructions_template(idl, args);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)) as Box<dyn IdlCodegenModule>);
-                }
-                
-                if let Some(_) = &idl.accounts {
-                    let template = TemplateFactory::create_non_anchor_accounts_template(idl, args);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                if let Some(_events) = &idl.events {
-                    let template = TemplateFactory::create_non_anchor_events_template(idl);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                if let Some(_) = &idl.types {
-                    let types_template = TemplateFactory::create_non_anchor_types_template(idl, args);
-                    // 使用trait继承进行向上转型
-                    let generic_template: Box<dyn crate::templates::TemplateGenerator> = types_template;
-                    modules.push(Box::new(BoxedTemplateAdapter::new(generic_template)));
-                }
-                
-                if let Some(errors) = &idl.errors {
-                    let template = TemplateFactory::create_non_anchor_errors_template(idl.program_name(), errors);
-                    modules.push(Box::new(BoxedTemplateAdapter::new(template)));
-                }
-                
-                // 生成parsers模块（基于generate_parser参数）
-                if args.generate_parser {
-                    let parsers_template = TemplateFactory::create_non_anchor_parsers_template(idl, args);
-                    // 使用trait继承进行向上转型
-                    let generic_template: Box<dyn crate::templates::TemplateGenerator> = parsers_template;
-                    modules.push(Box::new(BoxedTemplateAdapter::new(generic_template)));
-                }
-                
-                log::debug!("NonAnchor IDL 模板集成完成：{}", idl.program_name());
-            },
-        }
-        
-        modules
+    fn modules<'me>(&'me self, _args: &'me crate::Args) -> Vec<Box<dyn IdlCodegenModule + 'me>> {
+        // 传统模板系统的模块方法已移除，现在使用 MiniJinja 系统
+        // 返回空向量，write_readme.rs 会通过扫描生成的文件来确定模块结构
+        Vec::new()
     }
 
     fn is_anchor_contract(&self) -> bool {
