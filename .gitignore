@@ -9,6 +9,7 @@
 
 # IDE and personal configuration
 CLAUDE.md
+.claude/
 
 # Test files
 test_discriminator_validation.rs
