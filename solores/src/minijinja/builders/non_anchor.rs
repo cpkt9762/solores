@@ -9,7 +9,7 @@ use log;
 use super::super::utils;
 
 /// NonAnchor账户构建方法 - 完整实现
-pub fn build_non_anchor_account_value(account: &NonAnchorAccount) -> Value {
+pub fn build_non_anchor_account_value(account: &NonAnchorAccount, idl_enum: &crate::idl_format::IdlFormatEnum) -> Value {
     let fields: Vec<Value> = if let Some(ref fields_vec) = account.fields {
         fields_vec.iter().map(|field| {
             build_non_anchor_field_value(field)
@@ -19,7 +19,7 @@ pub fn build_non_anchor_account_value(account: &NonAnchorAccount) -> Value {
     };
 
     // 计算packed_size
-    let packed_size = utils::calculate_non_anchor_account_packed_size(account);
+    let packed_size = utils::calculate_non_anchor_account_packed_size(account, idl_enum);
     log::debug!("🎯 NonAnchor Account {} 计算得到 PACKED_LEN: {} 字节", account.name, packed_size);
 
     context! {
@@ -88,10 +88,16 @@ pub fn build_non_anchor_type_value(type_def: &NonAnchorType) -> Value {
                 build_non_anchor_field_value(field)
             }).collect();
             
+            // 检查struct是否支持Copy和Eq traits
+            let can_copy = is_non_anchor_struct_copy_compatible(fields);
+            let can_eq = is_non_anchor_struct_eq_compatible(fields);
+            
             context! {
                 name => type_def.name.to_case(Case::Pascal),
                 fields => fields_values,
                 kind => "struct",
+                can_copy => can_copy,
+                can_eq => can_eq,
                 docs => type_def.docs.as_ref().map(|docs| docs.join("\n")).unwrap_or_default()
             }
         },
@@ -107,10 +113,16 @@ pub fn build_non_anchor_type_value(type_def: &NonAnchorType) -> Value {
                 }
             }).collect();
             
+            // 检查enum是否支持Copy和Eq traits
+            let can_copy = is_non_anchor_enum_copy_compatible(variants);
+            let can_eq = is_non_anchor_enum_eq_compatible(variants);
+            
             context! {
                 name => type_def.name.to_case(Case::Pascal),
                 variants => variants_values,
                 kind => "enum",
+                can_copy => can_copy,
+                can_eq => can_eq,
                 docs => type_def.docs.as_ref().map(|docs| docs.join("\n")).unwrap_or_default()
             }
         },
@@ -227,5 +239,159 @@ pub fn is_non_anchor_big_array(field_type: &NonAnchorFieldType) -> bool {
             *size > 32
         },
         _ => false,
+    }
+}
+
+/// 检查NonAnchor字段类型是否支持Copy trait
+pub fn is_non_anchor_field_copy_compatible(field_type: &NonAnchorFieldType) -> bool {
+    match field_type {
+        NonAnchorFieldType::Basic(type_name) => {
+            // 基础Copy兼容类型
+            matches!(type_name.as_str(), 
+                "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+                "u64" | "i64" | "u128" | "i128" | "bool" | 
+                "f32" | "f64" | "publicKey" | "pubkey"
+            )
+        },
+        NonAnchorFieldType::Array { array } => {
+            let (element_type, _size) = array;
+            // 数组支持Copy当且仅当元素支持Copy：移除32字节限制（Rust 1.51+支持任意大小数组Copy）
+            is_non_anchor_field_copy_compatible(element_type)
+        },
+        NonAnchorFieldType::Option { option } => {
+            // Option支持Copy当且仅当内部类型支持Copy
+            is_non_anchor_field_copy_compatible(option)
+        },
+        NonAnchorFieldType::Vec { .. } => {
+            // Vec永远不支持Copy
+            false
+        },
+        NonAnchorFieldType::Complex { kind: _, params: _ } => {
+            // 复杂类型需要进一步分析，暂时返回false
+            false
+        },
+        NonAnchorFieldType::HashMap { .. } => {
+            // HashMap永远不支持Copy
+            false
+        },
+        NonAnchorFieldType::Defined { defined } => {
+            // 处理自定义类型
+            if defined.contains("String") || defined.contains("Vec<") || defined.contains("HashMap<") {
+                false
+            } else if defined.starts_with('[') && defined.contains(';') && defined.contains(']') {
+                // 数组类型检查：现代Rust支持所有大小数组的Copy trait
+                if let Some((_, size_str)) = extract_non_anchor_array_parts_from_string(defined) {
+                    if let Ok(_size) = size_str.parse::<usize>() {
+                        // 移除32字节限制：Rust 1.51+支持任意大小数组Copy
+                        return true;
+                    }
+                }
+                false
+            } else {
+                // 其他自定义类型默认假设支持Copy
+                true
+            }
+        }
+    }
+}
+
+/// 检查NonAnchor字段类型是否支持Eq trait
+pub fn is_non_anchor_field_eq_compatible(field_type: &NonAnchorFieldType) -> bool {
+    match field_type {
+        NonAnchorFieldType::Basic(type_name) => {
+            // Eq兼容类型，排除浮点数
+            matches!(type_name.as_str(), 
+                "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+                "u64" | "i64" | "u128" | "i128" | "bool" | 
+                "publicKey" | "pubkey"
+                // 注意：f32, f64不支持Eq
+            )
+        },
+        NonAnchorFieldType::Array { array } => {
+            let (element_type, _) = array;
+            // 数组支持Eq当且仅当元素支持Eq
+            is_non_anchor_field_eq_compatible(element_type)
+        },
+        NonAnchorFieldType::Option { option } => {
+            // Option支持Eq当且仅当内部类型支持Eq
+            is_non_anchor_field_eq_compatible(option)
+        },
+        NonAnchorFieldType::Vec { vec } => {
+            // Vec支持Eq当且仅当元素支持Eq
+            is_non_anchor_field_eq_compatible(vec)
+        },
+        NonAnchorFieldType::Complex { kind: _, params: _ } => {
+            // 复杂类型需要进一步分析，暂时假设支持Eq
+            true
+        },
+        NonAnchorFieldType::HashMap { .. } => {
+            // HashMap支持Eq当且仅当键和值都支持Eq（暂时假设支持）
+            true
+        },
+        NonAnchorFieldType::Defined { defined } => {
+            // 检查是否包含浮点数
+            if defined.contains("f32") || defined.contains("f64") {
+                false
+            } else {
+                // 其他自定义类型默认支持Eq
+                true
+            }
+        }
+    }
+}
+
+/// 检查NonAnchor enum是否支持Copy trait（所有变体的所有字段都支持Copy）
+pub fn is_non_anchor_enum_copy_compatible(variants: &[NonAnchorEnumVariant]) -> bool {
+    variants.iter().all(|variant| {
+        if let Some(ref fields) = variant.fields {
+            fields.iter().all(|field| is_non_anchor_field_copy_compatible(&field.field_type))
+        } else {
+            // 无字段的变体总是支持Copy
+            true
+        }
+    })
+}
+
+/// 检查NonAnchor enum是否支持Eq trait（所有变体的所有字段都支持Eq）
+pub fn is_non_anchor_enum_eq_compatible(variants: &[NonAnchorEnumVariant]) -> bool {
+    variants.iter().all(|variant| {
+        if let Some(ref fields) = variant.fields {
+            fields.iter().all(|field| is_non_anchor_field_eq_compatible(&field.field_type))
+        } else {
+            // 无字段的变体总是支持Eq
+            true
+        }
+    })
+}
+
+/// 检查NonAnchor struct是否支持Copy trait（所有字段都支持Copy）
+pub fn is_non_anchor_struct_copy_compatible(fields: &[NonAnchorField]) -> bool {
+    fields.iter().all(|field| is_non_anchor_field_copy_compatible(&field.field_type))
+}
+
+/// 检查NonAnchor struct是否支持Eq trait（所有字段都支持Eq）
+pub fn is_non_anchor_struct_eq_compatible(fields: &[NonAnchorField]) -> bool {
+    fields.iter().all(|field| is_non_anchor_field_eq_compatible(&field.field_type))
+}
+
+/// 辅助函数：从字符串中提取NonAnchor数组部分
+fn extract_non_anchor_array_parts_from_string(value: &str) -> Option<(String, String)> {
+    if !value.starts_with("[") || !value.ends_with("]") {
+        return None;
+    }
+    
+    let inner = &value[1..value.len()-1];
+    
+    if let Some(semicolon_pos) = inner.rfind(';') {
+        let type_part = inner[..semicolon_pos].trim().to_string();
+        let size_part = inner[semicolon_pos+1..].trim().to_string();
+        
+        if size_part.chars().all(|c| c.is_ascii_digit()) {
+            Some((type_part, size_part))
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }

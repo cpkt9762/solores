@@ -9,6 +9,7 @@ use minijinja::{context, Value};
 use log;
 
 use super::builders::{anchor, non_anchor};
+use super::builders::anchor::TypeTraitRegistry;
 
 /// 创建模板上下文
 pub fn create_template_context(
@@ -27,6 +28,9 @@ pub fn create_template_context(
         IdlFormatEnum::NonAnchor(non_anchor_idl) => &non_anchor_idl.address,
     };
     
+    // 获取当前时间戳
+    let generation_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    
     // 使用官方context!宏构建上下文
     let context = context! {
         features => if serde_feature { vec!["serde".to_string()] } else { Vec::<String>::new() },
@@ -37,6 +41,7 @@ pub fn create_template_context(
         crate_name => program_name,
         program_name => program_name.to_case(Case::Pascal),
         program_id => program_id,
+        generation_time => generation_time,
         accounts => accounts,
         instructions => instructions, 
         events => events,
@@ -56,7 +61,13 @@ pub fn extract_idl_data(
 ) -> std::result::Result<(Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>), SoloresError> {
     match idl_enum {
         IdlFormatEnum::Anchor(anchor_idl) => {
-            log::debug!("🔍 开始提取Anchor IDL数据 - 修复版本");
+            log::debug!("🔍 开始提取Anchor IDL数据 - 使用类型注册表修复版本");
+            
+            // 首先构建类型注册表，用于准确的trait支持检查
+            let type_registry = TypeTraitRegistry::build_from_idl(idl_enum);
+            log::debug!("📊 类型注册表构建完成，Copy支持: {} 个类型, Eq支持: {} 个类型", 
+                       type_registry.copy_supported.len(), 
+                       type_registry.eq_supported.len());
             
             // 直接从IDL构建各类数据，确保完整字段和正确分类
             let accounts: Vec<Value> = anchor_idl.accounts.as_ref().unwrap_or(&vec![])
@@ -109,8 +120,8 @@ pub fn extract_idl_data(
                     !is_used
                 })
                 .map(|type_def| {
-                    log::debug!("🔧 处理Type: {}", type_def.name);
-                    anchor::build_type_value(type_def)
+                    log::debug!("🔧 处理Type: {} (使用注册表)", type_def.name);
+                    anchor::build_type_value_with_registry(type_def, &type_registry)
                 })
                 .collect();
             
@@ -121,7 +132,7 @@ pub fn extract_idl_data(
         },
         IdlFormatEnum::NonAnchor(non_anchor_idl) => {
             let accounts: Vec<Value> = non_anchor_idl.accounts.as_ref().unwrap_or(&vec![]).iter().map(|account| {
-                non_anchor::build_non_anchor_account_value(account)
+                non_anchor::build_non_anchor_account_value(account, idl_enum)
             }).collect();
             
             let instructions: Vec<Value> = non_anchor_idl.instructions().iter().enumerate().map(|(index, instruction)| {
