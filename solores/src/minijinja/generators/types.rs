@@ -7,6 +7,7 @@ use minijinja::{context, Environment, Value};
 use std::fs;
 use std::path::Path;
 use convert_case::{Case, Casing};
+use log;
 
 /// 生成types文件夹和每个类型文件
 pub fn generate_types_folder(
@@ -18,12 +19,7 @@ pub fn generate_types_folder(
     // 获取types数据
     let types = context.get_attr("types").unwrap_or(Value::UNDEFINED);
     
-    // 检查是否有types数据
-    if types == Value::UNDEFINED || types.len().unwrap_or(0) == 0 {
-        return Ok(());
-    }
-    
-    // 创建types目录
+    // 创建types目录（即使为空也要创建）
     let types_dir = src_dir.join("types");
     fs::create_dir_all(&types_dir).map_err(|e| SoloresError::FileOperationError {
         operation: "create types directory".to_string(),
@@ -33,6 +29,16 @@ pub fn generate_types_folder(
         source: e,
         suggestion: Some("检查目录权限".to_string()),
     })?;
+    
+    // 检查是否有有效的types数据
+    let types_len = if types == Value::UNDEFINED { 0 } else { types.len().unwrap_or(0) };
+    
+    if types_len == 0 {
+        log::debug!("📁 没有types数据，生成空的types模块");
+        // 生成空的types/mod.rs
+        super::common::generate_folder_mod_file(env, &types_dir, &Vec::new(), "types", template_type)?;
+        return Ok(());
+    }
     
     // 收集类型文件名用于mod.rs
     let mut type_names = Vec::new();
@@ -50,7 +56,8 @@ pub fn generate_types_folder(
                         let type_context = context! {
                             type_def => type_def.clone(),
                             crate_name => context.get_attr("crate_name").unwrap_or(Value::from("")),
-                            has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false))
+                            has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false)),
+                            is_unified_library => context.get_attr("is_unified_library").unwrap_or(Value::from(false))
                         };
                         
                         // 生成类型文件

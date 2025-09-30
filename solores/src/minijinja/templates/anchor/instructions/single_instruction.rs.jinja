@@ -94,14 +94,30 @@ pub struct {{ instruction.name }}Keys {
     {% endif %}
     pub {{ account.name | snake_case }}: solana_pubkey::Pubkey,
     {% endfor %}
+    {% if has_remaining_accounts_info %}
+    /// Additional accounts provided via remaining_accounts
+    pub remaining_accounts: std::vec::Vec<solana_pubkey::Pubkey>,
+    {% endif %}
 }
 
 impl From<&[solana_pubkey::Pubkey]> for {{ instruction.name }}Keys {
     fn from(pubkeys: &[solana_pubkey::Pubkey]) -> Self {
+        {% if has_remaining_accounts_info %}
+        let fixed_accounts = {{ instruction.accounts | length }};
+        let remaining_accounts = if pubkeys.len() > fixed_accounts {
+            pubkeys[fixed_accounts..].to_vec()
+        } else {
+            std::vec::Vec::new()
+        };
+        {% endif %}
+        
         Self {
             {% for account in instruction.accounts %}
             {{ account.name | snake_case }}: pubkeys[{{ loop.index0 }}],
             {% endfor %}
+            {% if has_remaining_accounts_info %}
+            remaining_accounts,
+            {% endif %}
         }
     }
 }
@@ -109,14 +125,69 @@ impl From<&[solana_pubkey::Pubkey]> for {{ instruction.name }}Keys {
 impl {{ instruction.name }}Keys {
     /// Convert Keys to Vec<Pubkey>
     pub fn to_vec(&self) -> std::vec::Vec<solana_pubkey::Pubkey> {
+        {% if has_remaining_accounts_info %}
+        let mut accounts = std::vec![
+            {% for account in instruction.accounts %}
+            self.{{ account.name | snake_case }},
+            {% endfor %}
+        ];
+        accounts.extend_from_slice(&self.remaining_accounts);
+        accounts
+        {% else %}
         std::vec![
             {% for account in instruction.accounts %}
             self.{{ account.name | snake_case }},
             {% endfor %}
         ]
+        {% endif %}
     }
+    
+    {% for account in instruction.accounts %}
+    {% if account.pda %}
+    /// 为 {{ account.name }} 账户查找PDA地址
+    pub fn find_{{ account.name | snake_case }}_pda(
+        program_id: &solana_pubkey::Pubkey{% if account.pda.has_dynamic_params %},{% for param in account.pda.function_params %}
+        {{ param.name }}: {{ param.param_type }},{% endfor %}{% endif %}
+    ) -> (solana_pubkey::Pubkey, u8) {
+        solana_pubkey::Pubkey::find_program_address(
+            {{ account.pda.seeds_code }},
+            program_id
+        )
+    }
+    
+    /// 为 {{ account.name }} 账户派生PDA地址（不返回bump）
+    pub fn derive_{{ account.name | snake_case }}_pda(
+        program_id: &solana_pubkey::Pubkey{% if account.pda.has_dynamic_params %},{% for param in account.pda.function_params %}
+        {{ param.name }}: {{ param.param_type }},{% endfor %}{% endif %}
+    ) -> solana_pubkey::Pubkey {
+        Self::find_{{ account.name | snake_case }}_pda(program_id{% if account.pda.has_dynamic_params %}, {% for param in account.pda.function_params %}{{ param.name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}).0
+    }
+    {% endif %}
+    {% endfor %}
 }
 
+{% if has_remaining_accounts_info %}
+impl From<{{ instruction.name }}Keys> for std::vec::Vec<solana_instruction::AccountMeta> {
+    fn from(keys: {{ instruction.name }}Keys) -> Self {
+        let mut metas = std::vec![
+            {% for account in instruction.accounts %}
+            {% if account.is_mut %}
+            solana_instruction::AccountMeta::new(keys.{{ account.name | snake_case }}, {{ account.is_signer }}),
+            {% else %}
+            solana_instruction::AccountMeta::new_readonly(keys.{{ account.name | snake_case }}, {{ account.is_signer }}),
+            {% endif %}
+            {% endfor %}
+        ];
+        
+        // Add remaining accounts (readonly by default, could be customized)
+        for remaining_account in keys.remaining_accounts {
+            metas.push(solana_instruction::AccountMeta::new_readonly(remaining_account, false));
+        }
+        
+        metas
+    }
+}
+{% else %}
 impl From<{{ instruction.name }}Keys> for [solana_instruction::AccountMeta; {{ instruction_upper }}_IX_ACCOUNTS_LEN] {
     fn from(keys: {{ instruction.name }}Keys) -> Self {
         [
@@ -130,16 +201,23 @@ impl From<{{ instruction.name }}Keys> for [solana_instruction::AccountMeta; {{ i
         ]
     }
 }
+{% endif %}
 
 pub fn {{ instruction.name | snake_case }}_ix_with_program_id(
     program_id: solana_pubkey::Pubkey,
     keys: {{ instruction.name }}Keys,
     args: {{ instruction.name }}IxData,
 ) -> std::result::Result<solana_instruction::Instruction, std::io::Error> {
+    {% if has_remaining_accounts_info %}
+    let accounts: std::vec::Vec<solana_instruction::AccountMeta> = keys.into();
+    {% else %}
     let metas: [solana_instruction::AccountMeta; {{ instruction_upper }}_IX_ACCOUNTS_LEN] = keys.into();
+    let accounts = std::vec::Vec::from(metas);
+    {% endif %}
+    
     std::result::Result::Ok(solana_instruction::Instruction {
         program_id,
-        accounts: std::vec::Vec::from(metas),
+        accounts,
         data: args.try_to_vec()?,
     })
 }

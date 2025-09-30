@@ -74,6 +74,31 @@ pub trait IdlFormat {
     fn has_errors(&self) -> bool;
 }
 
+/// 统一代码生成器接口
+/// 用于统一库生成，允许直接生成代码到指定目录
+pub trait UnifiedCodeGenerator {
+    /// 生成指令模块到指定目录
+    fn generate_instructions(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成账户模块到指定目录
+    fn generate_accounts(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成类型模块到指定目录
+    fn generate_types(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成错误模块到指定目录
+    fn generate_errors(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成事件模块到指定目录
+    fn generate_events(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成解析器模块（如果需要）
+    fn generate_parsers(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+    
+    /// 生成模块的 mod.rs 文件
+    fn generate_mod_file(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError>;
+}
+
 /// 自动检测IDL格式并解析
 pub fn parse_idl_json(json_str: &str) -> Result<IdlFormatEnum, serde_json::Error> {
     // 首先尝试解析为通用JSON值进行格式检测
@@ -218,5 +243,47 @@ impl IdlFormat for IdlFormatEnum {
             IdlFormatEnum::Anchor(idl) => idl.errors.is_some(),
             IdlFormatEnum::NonAnchor(idl) => idl.errors.is_some(),
         }
+    }
+}
+
+impl UnifiedCodeGenerator for IdlFormatEnum {
+    fn generate_instructions(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        // 创建 MiniJinja 生成器并生成指令
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_instructions_for_unified(output_dir, args)
+    }
+    
+    fn generate_accounts(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_accounts_for_unified(output_dir, args)
+    }
+    
+    fn generate_types(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_types_for_unified(output_dir, args)
+    }
+    
+    fn generate_errors(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_errors_for_unified(output_dir, args)
+    }
+    
+    fn generate_events(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_events_for_unified(output_dir, args)
+    }
+    
+    fn generate_parsers(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        if args.generate_parser {
+            let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+            generator.generate_parsers_for_unified(output_dir, args)
+        } else {
+            Ok(())
+        }
+    }
+    
+    fn generate_mod_file(&self, output_dir: &std::path::Path, args: &crate::Args) -> Result<(), crate::error::SoloresError> {
+        let mut generator = crate::minijinja::MinijinjaTemplateGenerator::new(self.clone())?;
+        generator.generate_mod_for_unified(output_dir, args)
     }
 }

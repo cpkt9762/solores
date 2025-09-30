@@ -1,0 +1,7 @@
+//! {{ library_name }} - Unified Solana Protocol Interfaces
+//!
+//! Generated at {{ generation_time }}
+
+{% for group in protocol_groups %}
+pub mod {{ group.name }};
+{% endfor %}

@@ -93,26 +93,19 @@ class RaydiumInterfaceFixerMiniJinja:
             # 只修复 SwapBaseIn 和 SwapBaseOut，跳过 Initialize
             
             # 1. 修复 SwapBaseIn 长度检查：支持 17 或 18 账户
-            # 使用更精确的模式，只匹配SwapBaseIn指令区块
-            pattern1 = r'(if instruction_type == 9 \{[\s\S]*?)if accounts\.len\(\) < 18([\s\S]*?SwapBaseIn[\s\S]*?\})'
+            # 更新模式以匹配新的常量格式
+            pattern1 = r'(if instruction_type == 9 \{[\s\S]*?)if accounts\.len\(\) < crate::instructions::SWAPBASEIN_IX_ACCOUNTS_LEN([\s\S]*?SwapBaseIn[\s\S]*?\})'
             replacement1 = r'\1if accounts.len() != 17 && accounts.len() != 18\2'
             content = re.sub(pattern1, replacement1, content)
             
             # 2. 修复 SwapBaseOut 长度检查：支持 17 或 18 账户
-            # 使用更精确的模式，只匹配SwapBaseOut指令区块
-            pattern2 = r'(if instruction_type == 11 \{[\s\S]*?)if accounts\.len\(\) < 18([\s\S]*?SwapBaseOut[\s\S]*?\})'
+            # 更新模式以匹配新的常量格式
+            pattern2 = r'(if instruction_type == 11 \{[\s\S]*?)if accounts\.len\(\) < crate::instructions::SWAPBASEOUT_IX_ACCOUNTS_LEN([\s\S]*?SwapBaseOut[\s\S]*?\})'
             replacement2 = r'\1if accounts.len() != 17 && accounts.len() != 18\2'
             content = re.sub(pattern2, replacement2, content)
             
-            # 3. 修复账户传递方式 - SwapBaseIn
-            pattern3 = r'let keys = crate::instructions::SwapBaseInKeys::from\(&accounts\[\.\.18\]\);'
-            replacement3 = 'let keys = crate::instructions::SwapBaseInKeys::from(accounts);'
-            content = re.sub(pattern3, replacement3, content)
-            
-            # 4. 修复账户传递方式 - SwapBaseOut
-            pattern4 = r'let keys = crate::instructions::SwapBaseOutKeys::from\(&accounts\[\.\.18\]\);'
-            replacement4 = 'let keys = crate::instructions::SwapBaseOutKeys::from(accounts);'
-            content = re.sub(pattern4, replacement4, content)
+            # 3. 账户传递方式已经是 accounts，无需修复
+            # (现在模板已经直接使用 accounts，所以这个步骤不再需要)
             
             # 检查是否有更改
             if content == original_content:
@@ -170,8 +163,8 @@ class RaydiumInterfaceFixerMiniJinja:
                 serum_coin_vault_account: pubkeys[12],
                 serum_pc_vault_account: pubkeys[13],
                 serum_vault_signer: pubkeys[14],
-                uer_source_token_account: pubkeys[15],
-                uer_destination_token_account: pubkeys[16],
+                user_source_token_account: pubkeys[15],
+                user_destination_token_account: pubkeys[16],
                 user_source_owner: pubkeys[17],
             }
         } else {
@@ -192,8 +185,8 @@ class RaydiumInterfaceFixerMiniJinja:
                 serum_coin_vault_account: pubkeys[11],
                 serum_pc_vault_account: pubkeys[12],
                 serum_vault_signer: pubkeys[13],
-                uer_source_token_account: pubkeys[14],
-                uer_destination_token_account: pubkeys[15],
+                user_source_token_account: pubkeys[14],
+                user_destination_token_account: pubkeys[15],
                 user_source_owner: pubkeys[16],
             }
         }
@@ -230,8 +223,8 @@ class RaydiumInterfaceFixerMiniJinja:
             self.serum_coin_vault_account,
             self.serum_pc_vault_account,
             self.serum_vault_signer,
-            self.uer_source_token_account,
-            self.uer_destination_token_account,
+            self.user_source_token_account,
+            self.user_destination_token_account,
             self.user_source_owner,
         ]);
         
@@ -409,8 +402,8 @@ impl Default for WithdrawQueue {
                 serum_coin_vault_account: pubkeys[12],
                 serum_pc_vault_account: pubkeys[13],
                 serum_vault_signer: pubkeys[14],
-                uer_source_token_account: pubkeys[15],
-                uer_destination_token_account: pubkeys[16],
+                user_source_token_account: pubkeys[15],
+                user_destination_token_account: pubkeys[16],
                 user_source_owner: pubkeys[17],
             }
         } else {
@@ -431,8 +424,8 @@ impl Default for WithdrawQueue {
                 serum_coin_vault_account: pubkeys[11],
                 serum_pc_vault_account: pubkeys[12],
                 serum_vault_signer: pubkeys[13],
-                uer_source_token_account: pubkeys[14],
-                uer_destination_token_account: pubkeys[15],
+                user_source_token_account: pubkeys[14],
+                user_destination_token_account: pubkeys[15],
                 user_source_owner: pubkeys[16],
             }
         }
@@ -469,8 +462,8 @@ impl Default for WithdrawQueue {
             self.serum_coin_vault_account,
             self.serum_pc_vault_account,
             self.serum_vault_signer,
-            self.uer_source_token_account,
-            self.uer_destination_token_account,
+            self.user_source_token_account,
+            self.user_destination_token_account,
             self.user_source_owner,
         ]);
         
@@ -509,18 +502,26 @@ impl Default for WithdrawQueue {
             else:
                 checks.append("❌ SwapBaseIn/Out 长度检查修复失败")
             
-            # 验证Initialize保持原有逻辑
-            if "if instruction_type == 0" in instructions_content and "if accounts.len() < 18" in instructions_content:
+            # 验证Initialize保持原有逻辑（现在使用常量）
+            if "if instruction_type == 0" in instructions_content:
                 initialize_section = re.search(r'if instruction_type == 0 \{[\s\S]*?return Ok\(Self::Initialize[\s\S]*?\}\);', instructions_content)
-                if initialize_section and "accounts.len() < 18" in initialize_section.group():
-                    checks.append("✅ Initialize 保持原有的 < 18 账户检查逻辑")
+                if initialize_section and "crate::instructions::INITIALIZE_IX_ACCOUNTS_LEN" in initialize_section.group():
+                    checks.append("✅ Initialize 使用常量进行账户检查（已更新至新格式）")
                 else:
-                    checks.append("❌ Initialize 账户检查逻辑被意外修改")
+                    checks.append("❌ Initialize 账户检查逻辑异常")
             
-            if "SwapBaseInKeys::from(accounts)" in instructions_content:
-                checks.append("✅ SwapBaseIn 账户传递修复已应用")
+            # 检查账户传递方式（现在直接使用accounts）
+            if "SwapBaseInKeys::from(accounts)" in instructions_content and "SwapBaseOutKeys::from(accounts)" in instructions_content:
+                checks.append("✅ 账户传递已使用直接传递方式")
             else:
-                checks.append("❌ SwapBaseIn 账户传递修复失败")
+                checks.append("❌ 账户传递方式异常")
+            
+            # 检查是否使用了新的常量格式
+            constant_usage_count = instructions_content.count("_IX_ACCOUNTS_LEN")
+            if constant_usage_count > 10:  # 应该有很多指令使用常量
+                checks.append(f"✅ 新常量格式已被广泛使用 ({constant_usage_count} 个引用)")
+            else:
+                checks.append(f"⚠️  常量格式使用较少 ({constant_usage_count} 个引用)")
             
             # 检查SwapBaseInKeys修复
             swap_in_content = self.swap_base_in_file.read_text(encoding='utf-8')
@@ -652,10 +653,11 @@ impl Default for WithdrawQueue {
                 print("📋 修复摘要:")
                 print("  ✅ SwapBaseIn 现在支持 17 和 18 账户场景")
                 print("  ✅ SwapBaseOut 现在支持 17 和 18 账户场景") 
-                print("  ✅ Initialize 保持原有的 >= 18 账户检查逻辑")
+                print("  ✅ Initialize 使用常量进行账户检查（适配新的常量格式）")
                 print("  ✅ amm_target_orders 字段在17账户时为 None，18账户时为 Some")
                 print("  ✅ Option<Pubkey> serde序列化属性已修复")
                 print("  ✅ 所有修复已通过编译测试（包括serde特性）")
+                print("  ✅ 已适配新的常量引用格式（INSTRUCTION_NAME_IX_ACCOUNTS_LEN）")
                 print()
             
             return success

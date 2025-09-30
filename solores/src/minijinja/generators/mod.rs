@@ -10,6 +10,7 @@ pub mod parsers;
 pub mod errors;
 pub mod config;
 pub mod common;
+pub mod pda;
 
 // 重新导出主要功能
 pub use accounts::*;
@@ -20,3 +21,4 @@ pub use parsers::*;
 pub use errors::*;
 pub use config::*;
 pub use common::*;
+pub use pda::*;

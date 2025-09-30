@@ -91,14 +91,6 @@ impl {{ account.name }} {
                 },
             );
         }
-        if data.len() != Self::PACKED_LEN {
-            return Err(
-                crate::errors::AccountParseError::IncorrectLength {
-                    expected: Self::PACKED_LEN,
-                    found: data.len(),
-                },
-            );
-        }
         borsh::BorshDeserialize::deserialize(&mut &data[..])
             .map_err(|e| {
                 crate::errors::AccountParseError::DeserializationFailed(
@@ -106,4 +98,33 @@ impl {{ account.name }} {
                 )
             })
     }
+}
+
+/// Try from bytes to {{ account.name }}
+impl TryFrom<&[u8]> for {{ account.name }} {
+    type Error = crate::errors::AccountParseError;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value)
+    }
+{% if account.pda %}
+    
+    /// 查找此账户的PDA地址
+    pub fn find_pda(
+        program_id: &solana_pubkey::Pubkey{% if account.pda.has_dynamic_params %},{% for param in account.pda.function_params %}
+        {{ param.name }}: {{ param.param_type }},{% endfor %}{% endif %}
+    ) -> (solana_pubkey::Pubkey, u8) {
+        solana_pubkey::Pubkey::find_program_address(
+            {{ account.pda.seeds_code }},
+            program_id
+        )
+    }
+    
+    /// 派生此账户的PDA地址（不返回bump）
+    pub fn derive_pda(
+        program_id: &solana_pubkey::Pubkey{% if account.pda.has_dynamic_params %},{% for param in account.pda.function_params %}
+        {{ param.name }}: {{ param.param_type }},{% endfor %}{% endif %}
+    ) -> solana_pubkey::Pubkey {
+        Self::find_pda(program_id{% if account.pda.has_dynamic_params %}, {% for param in account.pda.function_params %}{{ param.name }}{{ ", " if not loop.last }}{% endfor %}{% endif %}).0
+    }
+{% endif %}
 }

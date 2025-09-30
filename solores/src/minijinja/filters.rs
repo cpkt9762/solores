@@ -4,9 +4,30 @@
 
 use convert_case::{Case, Casing};
 
-/// 处理蛇形命名的过滤器
+/// 处理蛇形命名的过滤器（特殊处理版本号）
 pub fn to_snake_case_filter(value: String) -> String {
-    value.to_case(Case::Snake)
+    // 特殊处理版本号模式，避免 v2 变成 v_2
+    let result = value.to_case(Case::Snake);
+    
+    // 修复常见的版本号分割问题
+    result
+        .replace("_v_2", "_v2")
+        .replace("_v_3", "_v3") 
+        .replace("_v_4", "_v4")
+        .replace("_v_5", "_v5")
+        .replace("_v_1", "_v1")
+        .replace("_v_0", "_v0")
+        // 处理带小数点的版本号
+        .replace("_v_1_0", "_v1_0")
+        .replace("_v_2_0", "_v2_0")
+        .replace("_v_3_0", "_v3_0")
+        // 处理可能的其他模式
+        .replace("v_2", "v2")
+        .replace("v_3", "v3")
+        .replace("v_4", "v4")
+        .replace("v_5", "v5")
+        .replace("v_1", "v1")
+        .replace("v_0", "v0")
 }
 
 /// 处理帕斯卡命名的过滤器
@@ -243,4 +264,87 @@ pub fn regex_replace_filter(value: String) -> String {
         }
     }
     value
+}
+
+/// 检查类型是否支持Copy trait的过滤器
+pub fn is_copy_compatible_filter(type_name: String) -> bool {
+    // 基础Copy兼容类型检查
+    if matches!(type_name.as_str(), 
+        "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+        "u64" | "i64" | "u128" | "i128" | "bool" | 
+        "f32" | "f64" | "Pubkey" | "solana_pubkey::Pubkey"
+    ) {
+        return true;
+    }
+    
+    // 检查是否包含不支持Copy的类型
+    if type_name.contains("String") || type_name.contains("Vec<") || type_name.contains("HashMap<") {
+        return false;
+    }
+    
+    // 数组类型检查
+    if type_name.starts_with('[') && type_name.contains(';') && type_name.contains(']') {
+        if let Some((_, size_str)) = extract_array_parts_from_filter(&type_name) {
+            if let Ok(size) = size_str.parse::<usize>() {
+                return size <= 32;
+            }
+        }
+        return false;
+    }
+    
+    // Option类型检查
+    if type_name.starts_with("Option<") || type_name.starts_with("std::option::Option<") {
+        // 暂时保守处理，假设Option内部类型支持Copy
+        return true;
+    }
+    
+    // 其他自定义类型默认支持Copy
+    true
+}
+
+/// 检查类型是否支持Eq trait的过滤器
+pub fn is_eq_compatible_filter(type_name: String) -> bool {
+    // 基础Eq兼容类型检查（排除浮点数）
+    if matches!(type_name.as_str(), 
+        "u8" | "i8" | "u16" | "i16" | "u32" | "i32" | 
+        "u64" | "i64" | "u128" | "i128" | "bool" | 
+        "Pubkey" | "solana_pubkey::Pubkey"
+    ) {
+        return true;
+    }
+    
+    // 浮点数不支持Eq
+    if matches!(type_name.as_str(), "f32" | "f64") || type_name.contains("f32") || type_name.contains("f64") {
+        return false;
+    }
+    
+    // Option、Vec、数组等类型检查（暂时保守处理）
+    if type_name.starts_with("Option<") || type_name.starts_with("Vec<") || type_name.starts_with('[') {
+        return true;  // 假设内部类型支持Eq
+    }
+    
+    // 其他自定义类型默认支持Eq
+    true
+}
+
+/// 辅助函数：从过滤器中提取数组部分
+fn extract_array_parts_from_filter(value: &str) -> Option<(String, String)> {
+    if !value.starts_with("[") || !value.ends_with("]") {
+        return None;
+    }
+    
+    let inner = &value[1..value.len()-1];
+    
+    if let Some(semicolon_pos) = inner.rfind(';') {
+        let type_part = inner[..semicolon_pos].trim().to_string();
+        let size_part = inner[semicolon_pos+1..].trim().to_string();
+        
+        if size_part.chars().all(|c| c.is_ascii_digit()) {
+            Some((type_part, size_part))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
 }

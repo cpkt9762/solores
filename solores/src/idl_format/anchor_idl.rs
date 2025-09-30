@@ -218,6 +218,36 @@ impl<'de> serde::Deserialize<'de> for AnchorAccount {
     }
 }
 
+/// PDA Seed 类型定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum PdaSeed {
+    /// 常量seed
+    #[serde(rename = "const")]
+    Const {
+        value: Vec<u8>,
+    },
+    /// 账户字段引用
+    #[serde(rename = "account")]
+    Account {
+        path: String,
+    },
+    /// 指令参数引用
+    #[serde(rename = "arg")]
+    Arg {
+        path: String,
+    },
+}
+
+/// PDA定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PdaDefinition {
+    /// Seeds用于生成PDA
+    pub seeds: Vec<PdaSeed>,
+    /// 可选的程序ID（用于跨程序PDA）
+    pub program: Option<PdaSeed>,
+}
+
 /// Anchor账户约束
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnchorAccountConstraint {
@@ -235,6 +265,8 @@ pub struct AnchorAccountConstraint {
     pub constraints: Option<Vec<String>>,
     /// 文档注释
     pub docs: Option<Vec<String>>,
+    /// PDA定义（如果该账户是PDA）
+    pub pda: Option<PdaDefinition>,
 }
 
 /// Anchor类型定义

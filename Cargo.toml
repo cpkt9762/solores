@@ -4,7 +4,7 @@ resolver = "2"
 members = [ 
     "solores", 
 ]
-exclude = ["test_output/"]
+exclude = ["test_output/", "batch_output/"]
 
 [workspace.dependencies]
 borsh = "^1.5"

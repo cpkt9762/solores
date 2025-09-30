@@ -30,12 +30,28 @@ pub enum ProgramEvent {
 
 impl ProgramEvent {
     /// Parse event from raw bytes using discriminator
+    /// Supports both standard emit! events and CPI emit_cpi! events
     pub fn try_parse(data: &[u8]) -> std::result::Result<Self, EventParseError> {
         if data.len() < 8 {
             return Err(EventParseError::DataTooShort { expected: 8, found: data.len() });
         }
         
-        let discriminator: [u8; 8] = data[0..8].try_into().unwrap();
+        // Check if first 8 bytes are EVENT_IX_TAG (CPI event format)
+        let first_8_bytes: [u8; 8] = data[0..8].try_into().unwrap();
+        let event_data = if first_8_bytes == crate::events::EVENT_IX_TAG {
+            // CPI format: [EVENT_IX_TAG: 8 bytes] + [discriminator: 8 bytes] + [event_data]
+            &data[8..]
+        } else {
+            // Standard format: [discriminator: 8 bytes] + [event_data]
+            &data[..]
+        };
+        
+        // Validate minimum length for discriminator
+        if event_data.len() < 8 {
+            return Err(EventParseError::DataTooShort { expected: 8, found: event_data.len() });
+        }
+        
+        let discriminator: [u8; 8] = event_data[0..8].try_into().unwrap();
         
         {% for event in events %}
         if discriminator == crate::events::{{ event.name }}::discriminator() {

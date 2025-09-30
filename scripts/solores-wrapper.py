@@ -49,6 +49,43 @@ class SoloresWrapper:
         # Raydium程序地址 - 仅修复这个特定的IDL
         self.RAYDIUM_PROGRAM_ADDRESS = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
     
+    def is_project_root_directory(self, directory: pathlib.Path) -> bool:
+        """检查目录是否为solores项目根目录"""
+        # 检查关键标识文件和目录
+        required_paths = [
+            "solores/Cargo.toml",        # solores子项目
+            "idls/gen/",                 # IDL目录
+            "scripts/solores-wrapper.py", # 当前脚本
+            "target/",                   # 构建目录
+        ]
+        
+        return all((directory / path).exists() for path in required_paths)
+    
+    def ensure_correct_working_directory(self) -> bool:
+        """检测并切换到正确的工作目录"""
+        current_dir = pathlib.Path.cwd()
+        
+        # 检查当前目录是否为项目根目录
+        if self.is_project_root_directory(current_dir):
+            log_debug(f"✅ 当前工作目录正确: {current_dir}")
+            return True
+        
+        # 检查脚本计算的project_root是否存在且正确
+        if self.project_root.exists() and self.is_project_root_directory(self.project_root):
+            try:
+                os.chdir(self.project_root)
+                log_info(f"🔧 自动切换工作目录: {current_dir} -> {self.project_root}")
+                return True
+            except Exception as e:
+                log_error(f"❌ 无法切换到项目根目录: {e}")
+                return False
+        else:
+            log_error(f"❌ 无法确定正确的项目根目录")
+            log_error(f"   当前目录: {current_dir}")
+            log_error(f"   脚本推断的根目录: {self.project_root}")
+            log_error(f"   脚本位置: {self.script_dir}")
+            return False
+    
     def check_build_needed(self) -> bool:
         """检查是否需要重新构建"""
         
@@ -198,6 +235,19 @@ class SoloresWrapper:
             log_debug(f"解析输出目录失败: {e}")
             return None
     
+    def get_unified_library_name(self, args: list[str]) -> str:
+        """从参数中提取统一库名称"""
+        try:
+            for i, arg in enumerate(args):
+                if arg == '--unified-library-name' and i + 1 < len(args):
+                    return args[i + 1]
+                elif arg.startswith('--unified-library-name='):
+                    return arg.split('=', 1)[1]
+            return None
+        except Exception as e:
+            log_debug(f"解析统一库名称失败: {e}")
+            return None
+
     def parse_command_args(self, args: list[str]) -> dict:
         """解析命令行参数，提取关键信息"""
         try:
@@ -206,7 +256,9 @@ class SoloresWrapper:
                 'input_path': args[0] if args else None,
                 'output_dir': self.get_output_dir(args),
                 'batch_output_dir': self.get_batch_output_dir(args),
-                'has_generate_parser': '--generate-parser' in args
+                'has_generate_parser': '--generate-parser' in args,
+                'is_unified_library': '--unified-library' in args,
+                'unified_library_name': self.get_unified_library_name(args)
             }
         except Exception as e:
             log_debug(f"解析命令行参数失败: {e}")
@@ -215,7 +267,9 @@ class SoloresWrapper:
                 'input_path': None,
                 'output_dir': None,
                 'batch_output_dir': None,
-                'has_generate_parser': False
+                'has_generate_parser': False,
+                'is_unified_library': False,
+                'unified_library_name': None
             }
     
     def scan_batch_for_raydium(self, input_path: str) -> list[str]:
@@ -327,7 +381,58 @@ class SoloresWrapper:
                 log_error(f"❌ 处理{raydium_file}时出错: {e}")
         
         return success_count
-    
+
+    def apply_unified_library_fix(self, output_dir: str, unified_library_name: str) -> bool:
+        """应用统一库引用修复脚本"""
+        try:
+            unified_fix_script = self.script_dir / "fix_unified_library_references.py"
+
+            if not unified_fix_script.exists():
+                log_error(f"❌ 统一库修复脚本不存在: {unified_fix_script}")
+                log_error("   请确保 fix_unified_library_references.py 存在于scripts目录中")
+                return False
+
+            # 构造统一库目录路径
+            unified_lib_dir = pathlib.Path(output_dir) / unified_library_name
+
+            if not unified_lib_dir.exists():
+                log_error(f"❌ 统一库目录不存在: {unified_lib_dir}")
+                return False
+
+            log_info(f"🔧 应用统一库引用修复: {unified_lib_dir}")
+
+            # 执行修复脚本 - 直接使用 Python 运行脚本
+            cmd = ["python3", str(unified_fix_script)]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=str(self.project_root)  # 在项目根目录运行
+            )
+
+            # 输出脚本的标准输出
+            if result.stdout:
+                print(result.stdout)
+
+            log_info("✅ 统一库引用修复成功!")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            log_error(f"❌ 统一库引用修复失败! 退出码: {e.returncode}")
+            log_error(f"   修复脚本: {unified_fix_script}")
+            log_error(f"   统一库目录: {unified_lib_dir}")
+
+            if e.stdout:
+                log_error(f"   标准输出:\n{e.stdout}")
+            if e.stderr:
+                log_error(f"   错误输出:\n{e.stderr}")
+
+            return False
+        except Exception as e:
+            log_error(f"❌ 执行统一库修复脚本时出错: {e}")
+            return False
+
     def run_solores(self, args: list[str]) -> bool:
         """运行solores命令，返回是否成功"""
         cmd = [str(self.solores_bin)] + args
@@ -347,6 +452,11 @@ class SoloresWrapper:
     
     def main(self, args: list[str]):
         """主函数"""
+        # 首先确保在正确的工作目录
+        if not self.ensure_correct_working_directory():
+            log_error("❌ 工作目录验证失败，无法继续执行")
+            sys.exit(1)
+        
         log_info("🚀 Solores智能包装器启动 (UV版本)")
         
         # 检查项目结构
@@ -424,7 +534,27 @@ class SoloresWrapper:
             log_debug("Solores执行失败，跳过Raydium修复")
         else:
             log_debug("无需应用Raydium修复")
-        
+
+        # 统一库引用修复
+        if success and cmd_info['is_unified_library']:
+            log_info("🔧 开始自动统一库引用修复...")
+
+            output_dir = cmd_info['output_dir']
+            unified_library_name = cmd_info['unified_library_name']
+
+            if output_dir and unified_library_name:
+                if self.apply_unified_library_fix(output_dir, unified_library_name):
+                    log_info("✅ 统一库引用修复成功!")
+                else:
+                    log_warn("⚠️  统一库引用修复失败，请检查详细错误信息")
+                    log_warn("   可以手动运行: python3 scripts/fix_unified_library_references.py")
+            else:
+                log_warn("⚠️  无法确定统一库输出目录或名称，跳过自动修复")
+                log_warn(f"   输出目录: {output_dir}")
+                log_warn(f"   统一库名称: {unified_library_name}")
+        elif success and cmd_info['is_unified_library']:
+            log_debug("统一库生成失败，跳过引用修复")
+
         log_info("🎉 Solores包装器执行完成")
 
 if __name__ == "__main__":

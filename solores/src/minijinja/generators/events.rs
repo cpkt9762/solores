@@ -66,7 +66,8 @@ pub fn generate_events_folder(
                             let event_context = context! {
                                 event => event.clone(),
                                 crate_name => context.get_attr("crate_name").unwrap_or(Value::from("")),
-                                has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false))
+                                has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false)),
+                                is_unified_library => context.get_attr("is_unified_library").unwrap_or(Value::from(false))
                             };
                             
                             // 生成事件文件

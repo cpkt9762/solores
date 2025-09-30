@@ -18,6 +18,7 @@ pub fn create_template_context(
     serde_feature: bool,
     generate_parser: bool,
     no_empty_workspace: bool,
+    is_unified_library: bool,
 ) -> std::result::Result<Value, SoloresError> {
     // 从IDL中提取实际数据
     let (accounts, instructions, events, types) = extract_idl_data(idl_enum)?;
@@ -38,6 +39,7 @@ pub fn create_template_context(
         generate_parser => generate_parser,
         has_parsers => generate_parser,
         no_empty_workspace => no_empty_workspace,
+        is_unified_library => is_unified_library,
         crate_name => program_name,
         program_name => program_name.to_case(Case::Pascal),
         program_id => program_id,

@@ -1,0 +1,1 @@
+use convert_case::{Case, Casing}; fn main() { println\!("lifinity_v2 -> {}", "lifinity_v2".to_case(Case::Snake)); println\!("raydium_v4 -> {}", "raydium_v4".to_case(Case::Snake)); println\!("pump_amm_v3 -> {}", "pump_amm_v3".to_case(Case::Snake)); }

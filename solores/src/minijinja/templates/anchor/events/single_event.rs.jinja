@@ -63,12 +63,29 @@ impl {{ event.name }} {
     }
     
     /// Deserialize from bytes with discriminator validation
+    /// Supports both standard emit! events and CPI emit_cpi! events
     pub fn from_bytes(data: &[u8]) -> std::result::Result<Self, EventParseError> {
         if data.len() < 8 {
             return Err(EventParseError::DataTooShort { expected: 8, found: data.len() });
         }
         
-        let discriminator: [u8; 8] = data[0..8].try_into().unwrap();
+        // Check if first 8 bytes are EVENT_IX_TAG (CPI event format)
+        let first_8_bytes: [u8; 8] = data[0..8].try_into().unwrap();
+        let mut event_data = if first_8_bytes == super::EVENT_IX_TAG {
+            // CPI format: [EVENT_IX_TAG: 8 bytes] + [discriminator: 8 bytes] + [event_data]
+            &data[8..]
+        } else {
+            // Standard format: [discriminator: 8 bytes] + [event_data]
+            &data[..]
+        };
+        
+        // Validate minimum length for discriminator
+        if event_data.len() < 8 {
+            return Err(EventParseError::DataTooShort { expected: 8, found: event_data.len() });
+        }
+        
+        // Verify discriminator
+        let discriminator: [u8; 8] = event_data[0..8].try_into().unwrap();
         if discriminator != Self::discriminator() {
             return Err(EventParseError::DiscriminatorMismatch { 
                 expected: Self::discriminator(), 
@@ -76,7 +93,8 @@ impl {{ event.name }} {
             });
         }
         
-        borsh::BorshDeserialize::deserialize(&mut &data[..])
+        // Deserialize the complete event (including discriminator field)
+        borsh::BorshDeserialize::deserialize(&mut event_data)
             .map_err(|e| EventParseError::DeserializationFailed(
                 format!("Failed to deserialize {} event: {}", "{{ event.name }}", e)
             ))

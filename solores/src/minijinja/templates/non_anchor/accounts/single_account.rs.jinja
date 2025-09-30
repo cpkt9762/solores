@@ -85,3 +85,11 @@ impl {{ account.name }} {
             })
     }
 }
+
+/// Try from bytes to {{ account.name }}
+impl TryFrom<&[u8]> for {{ account.name }} {
+    type Error = crate::errors::AccountParseError;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::from_bytes(value)
+    }
+}

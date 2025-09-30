@@ -20,6 +20,7 @@ pub mod error;
 pub mod idl_format;
 pub mod minijinja; // MiniJinja 模块化模板系统
                    // pub mod templates;  // 传统模板系统 - 已移除
+// unified_library功能已集成到minijinja模块中
 pub mod utils;
 pub mod workspace; // 新增workspace生成功能
 pub mod write_gitignore;
@@ -31,6 +32,7 @@ use cargo::{
     write_workspace_member_cargo_toml,
 };
 use workspace::{add_workspace_member, finalize_workspace, validate_workspace_config};
+use minijinja::generator::{auto_group_protocols, UnifiedLibraryConfig};
 use write_gitignore::write_gitignore;
 use write_readme::write_readme;
 use write_src::*;
@@ -193,6 +195,16 @@ pub struct Args {
         default_value = "true"
     )]
     pub no_empty_workspace: bool,
+
+    #[arg(long, help = "生成统一接口库（将多个IDL合并到单一库中）")]
+    pub unified_library: bool,
+
+    #[arg(
+        long,
+        help = "统一接口库的名称",
+        default_value = "solana_protocols"
+    )]
+    pub unified_library_name: String,
 }
 
 /// 获取用于错误显示的绝对路径字符串
@@ -497,6 +509,13 @@ fn process_batch(args: Args) {
         if !args.batch_exclude.is_empty() || !args.batch_include.is_empty() {
             log::info!("💡 提示: 检查您的过滤模式是否正确");
         }
+        return;
+    }
+
+    // 检查是否启用统一库模式
+    if args.unified_library {
+        log::info!("🚀 启用统一库生成模式");
+        process_unified_library(args, &idl_files);
         return;
     }
 
@@ -825,6 +844,74 @@ pub fn load_idl_with_diagnostics(file: &mut File) -> Result<Box<dyn IdlFormat>, 
     try_parse_idl_formats(&content)
 }
 
+/// 加载IDL文件并返回IdlFormatEnum（用于统一库生成）
+pub fn load_idl_as_enum(file: &mut File) -> Result<IdlFormatEnum, SoloresError> {
+    log::debug!("开始IDL解析诊断流程（返回枚举）");
+
+    // 1. 读取文件内容
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| SoloresError::file_operation_error("读取IDL文件", "IDL file", e))?;
+
+    log::debug!("IDL文件大小: {} bytes", content.len());
+
+    // 2. 验证JSON格式
+    let json_value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| diagnose_json_error(&content, &e))?;
+
+    log::debug!("JSON格式验证通过");
+
+    // 3. 检查基本结构
+    validate_idl_structure(&json_value)?;
+
+    log::debug!("IDL基本结构验证通过");
+
+    // 4. 解析为IdlFormatEnum
+    parse_idl_json(&content).map_err(|e| {
+        log::error!("IDL格式解析失败");
+        let error_msg = e.to_string();
+        if error_msg.contains("duplicate field") {
+            let field_name = error_msg
+                .split("duplicate field `")
+                .nth(1)
+                .and_then(|s| s.split('`').next())
+                .unwrap_or("unknown");
+            SoloresError::DuplicateFieldError {
+                field: field_name.to_string(),
+                location: "IDL parsing".to_string(),
+                suggestion: format!(
+                    "IDL文件中存在重复的字段 '{}'。请检查:\n\
+                     1. 指令定义中是否有重复的参数名\n\
+                     2. 账户定义中是否有重复的字段名\n\
+                     3. 类型定义中是否有重复的成员名",
+                    field_name
+                ),
+            }
+        } else if error_msg.contains("missing field") {
+            let field_name = error_msg
+                .split("missing field `")
+                .nth(1)
+                .and_then(|s| s.split('`').next())
+                .unwrap_or("unknown");
+            SoloresError::MissingFieldError {
+                field: field_name.to_string(),
+                context: "IDL parsing".to_string(),
+                suggestion: Some(get_missing_field_suggestion(field_name)),
+            }
+        } else {
+            SoloresError::InvalidIdlFormat {
+                details: format!("无法识别的IDL格式: {}", error_msg),
+                expected_format: Some(
+                    "支持的格式包括:\n\
+                    - Anchor IDL (8字节discriminator)\n\
+                    - NonAnchor IDL (1字节discriminator或其他识别方式)"
+                        .to_string(),
+                ),
+            }
+        }
+    })
+}
+
 /// 尝试解析不同的IDL格式（使用新的二元架构）
 fn try_parse_idl_formats(content: &str) -> Result<Box<dyn IdlFormat>, SoloresError> {
     log::debug!("使用新的二元架构解析IDL格式");
@@ -987,4 +1074,42 @@ fn format_single_rust_file(file_path: &Path) -> Result<(), SoloresError> {
     }
 
     Ok(())
+}
+
+/// 处理统一库生成
+fn process_unified_library(args: Args, idl_files: &[PathBuf]) {
+    log::info!("🔄 开始统一库生成流程");
+    
+    // 自动分组协议
+    let protocol_groups = match auto_group_protocols(idl_files) {
+        Ok(groups) => groups,
+        Err(e) => {
+            log::error!("❌ 协议分组失败: {}", e);
+            return;
+        }
+    };
+
+    if protocol_groups.is_empty() {
+        log::warn!("⚠️  没有找到任何协议组");
+        return;
+    }
+
+    // 创建统一库配置
+    let config = UnifiedLibraryConfig {
+        library_name: args.unified_library_name.clone(),
+        output_dir: args.batch_output_dir.clone(),
+        protocol_groups,
+        base_args: args,
+    };
+
+    // 生成统一库
+    match minijinja::generator::MinijinjaTemplateGenerator::generate_unified_library(&config) {
+        Ok(()) => {
+            log::info!("✅ 统一库生成成功");
+            log::info!("📁 输出位置: {}/{}", config.output_dir.display(), config.library_name);
+        }
+        Err(e) => {
+            log::error!("❌ 统一库生成失败: {}", e);
+        }
+    }
 }

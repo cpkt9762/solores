@@ -48,13 +48,13 @@ impl ProgramInstruction {
                     format!("Failed to deserialize {} instruction: {}", "{{ instruction.name }}", e)
                 ))?;
             {% if instruction.accounts %}
-            if accounts.len() < {{ instruction.accounts|length }} {
+            if accounts.len() < crate::instructions::{{ instruction.name | upper }}_IX_ACCOUNTS_LEN {
                 return Err(InstructionParseError::DataTooShort { 
-                    expected: {{ instruction.accounts|length }}, 
+                    expected: crate::instructions::{{ instruction.name | upper }}_IX_ACCOUNTS_LEN, 
                     found: accounts.len() 
                 });
             }
-            let keys = crate::instructions::{{ instruction.name }}Keys::from(&accounts[..{{ instruction.accounts|length }}]);
+            let keys = crate::instructions::{{ instruction.name }}Keys::from(accounts);
             return Ok(Self::{{ instruction.name }}(keys, ix_data));
             {% else %}
             return Ok(Self::{{ instruction.name }}(ix_data));

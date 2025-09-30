@@ -1040,41 +1040,51 @@ impl NonAnchorIdl {
                 .unwrap_or("UnnamedVariant")
                 .to_string();
             
-            // 解析fields字段 - phoenix风格的enum variant fields格式特殊
+            // 解析fields字段 - 支持两种格式：标准格式和Phoenix特殊格式
             let fields = variant_obj.get("fields")
                 .map(|fields_value| {
+                    log::debug!("🔧 解析enum variant '{}' 的字段，字段数量: {}", 
+                        name, fields_value.as_array().map_or(0, |arr| arr.len()));
+                    
                     if let Some(fields_array) = fields_value.as_array() {
-                        let mut parsed_fields = Vec::new();
-                        for (field_index, field_value) in fields_array.iter().enumerate() {
-                            // phoenix的enum variant fields格式：[{"defined": "TypeName"}]
-                            if let Some(field_obj) = field_value.as_object() {
-                                if let Some(defined) = field_obj.get("defined").and_then(|v| v.as_str()) {
-                                    // 将{"defined": "TypeName"}转换为标准field格式
-                                    parsed_fields.push(NonAnchorField {
-                                        name: format!("field_{}", field_index),
-                                        field_type: NonAnchorFieldType::Defined { 
-                                            defined: defined.to_string() 
-                                        },
-                                        docs: None,
-                                    });
-                                } else {
-                                    // 其他格式尝试标准解析
-                                    if let Ok(field_type) = Self::parse_field_type_manually(field_value) {
-                                        parsed_fields.push(NonAnchorField {
-                                            name: format!("field_{}", field_index),
-                                            field_type,
-                                            docs: None,
-                                        });
+                        // 检查字段格式类型
+                        if let Some(first_field) = fields_array.first() {
+                            if let Some(first_obj) = first_field.as_object() {
+                                // 检查是否是Phoenix特殊格式：[{"defined": "TypeName"}] (无name字段)
+                                if first_obj.contains_key("defined") && !first_obj.contains_key("name") {
+                                    log::debug!("🔧 检测到Phoenix特殊格式enum variant fields (无name字段)");
+                                    // Phoenix特殊格式处理
+                                    let mut parsed_fields = Vec::new();
+                                    for (field_index, field_value) in fields_array.iter().enumerate() {
+                                        if let Some(field_obj) = field_value.as_object() {
+                                            if let Some(defined) = field_obj.get("defined").and_then(|v| v.as_str()) {
+                                                parsed_fields.push(NonAnchorField {
+                                                    name: format!("field_{}", field_index),
+                                                    field_type: NonAnchorFieldType::Defined { 
+                                                        defined: defined.to_string() 
+                                                    },
+                                                    docs: None,
+                                                });
+                                            }
+                                        }
                                     }
+                                    Ok(parsed_fields)
+                                } else {
+                                    log::debug!("🔧 检测到标准格式enum variant fields (有name字段)");
+                                    // 标准格式处理
+                                    Self::parse_fields_manually(fields_value)
                                 }
+                            } else {
+                                Self::parse_fields_manually(fields_value)
                             }
+                        } else {
+                            Self::parse_fields_manually(fields_value)
                         }
-                        Some(parsed_fields)
                     } else {
-                        None
+                        Self::parse_fields_manually(fields_value)
                     }
                 })
-                .flatten();
+                .transpose()?;
             
             let docs = variant_obj.get("docs")
                 .and_then(|v| v.as_array())

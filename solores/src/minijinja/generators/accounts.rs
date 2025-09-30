@@ -24,21 +24,7 @@ pub fn generate_accounts_folder(
     log::debug!("🔍 generate_accounts_folder: accounts.len() = {:?}", accounts.len());
     log::debug!("🔍 generate_accounts_folder: accounts == Value::UNDEFINED = {}", accounts == Value::UNDEFINED);
     
-    // 修复条件检查：正确检查Vec长度
-    if accounts == Value::UNDEFINED {
-        log::debug!("❌ accounts数据为UNDEFINED，跳过生成");
-        return Ok(());
-    }
-    
-    let accounts_len = accounts.len().unwrap_or(0);
-    if accounts_len == 0 {
-        log::debug!("❌ accounts数据为空，跳过生成");
-        return Ok(());
-    }
-    
-    log::debug!("✅ 找到 {} 个accounts，开始生成目录", accounts_len);
-    
-    // 创建accounts目录
+    // 创建accounts目录（即使为空也要创建）
     let accounts_dir = src_dir.join("accounts");
     fs::create_dir_all(&accounts_dir).map_err(|e| SoloresError::FileOperationError {
         operation: "create accounts directory".to_string(),
@@ -48,6 +34,18 @@ pub fn generate_accounts_folder(
         source: e,
         suggestion: Some("检查目录权限".to_string()),
     })?;
+    
+    // 检查是否有有效的accounts数据
+    let accounts_len = if accounts == Value::UNDEFINED { 0 } else { accounts.len().unwrap_or(0) };
+    
+    if accounts_len == 0 {
+        log::debug!("📁 没有accounts数据，生成空的accounts模块");
+        // 生成空的accounts/mod.rs
+        super::common::generate_folder_mod_file(env, &accounts_dir, &Vec::new(), "accounts", template_type)?;
+        return Ok(());
+    }
+    
+    log::debug!("✅ 找到 {} 个accounts，开始生成目录", accounts_len);
     
     // 收集账户文件名用于mod.rs
     let mut account_names = Vec::new();
@@ -65,7 +63,8 @@ pub fn generate_accounts_folder(
                         let account_context = context! {
                             account => account.clone(),
                             crate_name => context.get_attr("crate_name").unwrap_or(Value::from("")),
-                            has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false))
+                            has_serde => context.get_attr("has_serde").unwrap_or(Value::from(false)),
+                            is_unified_library => context.get_attr("is_unified_library").unwrap_or(Value::from(false))
                         };
                         
                         // 生成账户文件
