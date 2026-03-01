@@ -130,9 +130,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -156,9 +156,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -174,9 +174,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -192,9 +192,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -209,9 +209,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -227,9 +227,9 @@ impl MinijinjaTemplateGenerator {
         args: &crate::Args,
     ) -> Result<(), SoloresError> {
         let context = context::create_template_context(
-            &self.idl_enum, 
-            self.get_program_name(), 
-            args.generate_to_json, 
+            &self.idl_enum,
+            self.get_program_name(),
+            args.generate_to_json,
             args.generate_parser,
             args.no_empty_workspace,
             true  // is_unified_library
@@ -493,6 +493,8 @@ impl MinijinjaTemplateGenerator {
             "num_traits_vers": config.base_args.num_traits_vers,
             "serde_vers": config.base_args.serde_vers,
             "serde_with_vers": config.base_args.serde_with_vers,
+            "serde_big_array_vers": config.base_args.serde_big_array_vers,
+            "serde_json_vers": config.base_args.serde_json_vers,
             "bytemuck_vers": config.base_args.bytemuck_vers,
             "generation_time": chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
             "solores_version": env!("CARGO_PKG_VERSION"),

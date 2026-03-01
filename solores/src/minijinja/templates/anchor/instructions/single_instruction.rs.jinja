@@ -33,6 +33,10 @@ pub struct {{ instruction.name }}IxData {
     {% if has_serde %}
     {% if field.rust_type == "solana_pubkey::Pubkey" %}
     #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<serde_with::DisplayFromStr>"))]
+    {% elif field.rust_type | starts_with("std::option::Option<solana_pubkey::Pubkey>") or field.rust_type | starts_with("Option<solana_pubkey::Pubkey>") %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<std::option::Option<serde_with::DisplayFromStr>>"))]
+    {% elif field.rust_type | starts_with("std::vec::Vec<solana_pubkey::Pubkey>") or field.rust_type | starts_with("Vec<solana_pubkey::Pubkey>") %}
+    #[cfg_attr(feature = "serde", serde(with = "serde_with::As::<std::vec::Vec<serde_with::DisplayFromStr>>"))]
     {% elif field.is_big_array %}
     #[cfg_attr(feature = "serde", serde(with = "serde_big_array::BigArray"))]
     {% endif %}

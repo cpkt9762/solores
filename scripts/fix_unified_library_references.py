@@ -163,7 +163,16 @@ def fix_raydium_account_keys(file_path: str, protocol_name: str) -> int:
             print(f"  修正 to_vec 中的 Option 展开")
             fixes_count += 1
             content = new_content
-            
+
+        # 5. 修复 serde 属性以支持 Option<Pubkey>
+        pattern5 = r'#\[cfg_attr\(feature = "serde", serde\(with = "serde_with::As::<serde_with::DisplayFromStr>"\)\)\]\s+pub amm_target_orders: Option<solana_pubkey::Pubkey>,'
+        replacement5 = '#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<std::option::Option<serde_with::DisplayFromStr>>"))]\n    pub amm_target_orders: Option<solana_pubkey::Pubkey>,'
+        new_content = re.sub(pattern5, replacement5, content)
+        if new_content != content:
+            print(f"  修正 serde 属性以支持 Option<Pubkey>")
+            fixes_count += 1
+            content = new_content
+
         if content != original_content:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -224,13 +233,27 @@ def apply_raydium_special_fixes(file_path: str, protocol_name: str) -> int:
 
 def main():
     """主函数"""
+    import sys
+
     print("🔧 开始修正统一库引用错误...")
 
-    # 查找统一库目录
-    unified_lib_dirs = glob.glob("batch_output/*/")
-    if not unified_lib_dirs:
-        print("❌ 未找到统一库输出目录")
-        return
+    # 支持命令行参数指定统一库路径
+    if len(sys.argv) > 1:
+        # 使用命令行参数指定的路径
+        specified_path = sys.argv[1]
+        if os.path.isdir(specified_path):
+            unified_lib_dirs = [specified_path]
+            print(f"📂 使用指定路径: {specified_path}")
+        else:
+            print(f"❌ 指定路径不存在: {specified_path}")
+            return
+    else:
+        # 默认查找 batch_output 目录
+        unified_lib_dirs = glob.glob("batch_output/*/")
+        if not unified_lib_dirs:
+            print("❌ 未找到统一库输出目录")
+            print("💡 提示: 可以使用命令行参数指定路径：python3 script.py <统一库路径>")
+            return
 
     for unified_dir in unified_lib_dirs:
         print(f"\n📁 处理统一库: {unified_dir}")

@@ -138,6 +138,13 @@ pub struct Args {
 
     #[arg(
         long,
+        help = "serde_json dependency version for generated crate",
+        default_value = "^1.0"
+    )]
+    pub serde_json_vers: String,
+
+    #[arg(
+        long,
         default_value = "true",
         help = "generate parser functions for account and instruction parsing (enabled by default)"
     )]

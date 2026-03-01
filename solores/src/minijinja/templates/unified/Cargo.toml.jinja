@@ -27,10 +27,12 @@ num-traits = "{{ num_traits_vers }}"
 serde = { version = "{{ serde_vers }}", features = ["derive"], optional = true }
 serde_with = { version = "{{ serde_with_vers }}", optional = true }
 bytemuck = { version = "{{ bytemuck_vers }}", features = ["derive"], optional = true }
+serde-big-array = { version = "{{ serde_big_array_vers }}", optional = true }
+serde_json = { version = "{{ serde_json_vers }}", optional = true }
 
 [features]
-default = []
-serde = ["dep:serde", "dep:serde_with"]
+default = ["serde"]
+serde = ["dep:serde", "dep:serde_with", "dep:serde-big-array", "dep:serde_json"]
 zero-copy = ["dep:bytemuck"]
 
 [package.metadata]
